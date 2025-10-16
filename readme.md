@@ -1,4 +1,3 @@
-love this project. here’s a robust, testable, maintainable architecture you can build comfortably and keep entirely local (no server).
 
 # high-level goals
 
