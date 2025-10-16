@@ -1,4 +1,4 @@
-import { ChangeEvent } from "react";
+import { ChangeEvent, useEffect } from "react";
 import { usePrefsStore } from "../../state/prefsStore";
 
 export default function SettingsPage() {
@@ -6,6 +6,14 @@ export default function SettingsPage() {
   const highlightColors = usePrefsStore((state) => state.prefs.highlightColors);
   const updateStyle = usePrefsStore((state) => state.updateSubtitleStyle);
   const updateHighlights = usePrefsStore((state) => state.updateHighlightColors);
+  const initialized = usePrefsStore((state) => state.initialized);
+  const initialize = usePrefsStore((state) => state.initialize);
+
+  useEffect(() => {
+    if (!initialized) {
+      void initialize();
+    }
+  }, [initialized, initialize]);
 
   const handleNumberChange = (
     event: ChangeEvent<HTMLInputElement>,
@@ -13,7 +21,7 @@ export default function SettingsPage() {
   ) => {
     const value = Number(event.target.value);
     if (Number.isFinite(value)) {
-      updateStyle({ [key]: key === "lineHeight" ? Number(value.toFixed(2)) : value });
+      void updateStyle({ [key]: key === "lineHeight" ? Number(value.toFixed(2)) : value });
     }
   };
 
@@ -27,7 +35,7 @@ export default function SettingsPage() {
             <input
               type="text"
               value={subtitleStyle.fontFamily}
-              onChange={(event) => updateStyle({ fontFamily: event.target.value })}
+              onChange={(event) => void updateStyle({ fontFamily: event.target.value })}
               className="rounded-md border border-white/10 bg-black/40 px-3 py-2 text-white focus:border-white/40 focus:outline-none"
             />
           </label>
@@ -71,7 +79,7 @@ export default function SettingsPage() {
             <input
               type="color"
               value={subtitleStyle.color}
-              onChange={(event) => updateStyle({ color: event.target.value })}
+              onChange={(event) => void updateStyle({ color: event.target.value })}
               className="h-10 w-full cursor-pointer rounded-md border border-white/10 bg-black/40"
             />
           </label>
@@ -80,7 +88,7 @@ export default function SettingsPage() {
             <input
               type="text"
               value={subtitleStyle.bgColor}
-              onChange={(event) => updateStyle({ bgColor: event.target.value })}
+              onChange={(event) => void updateStyle({ bgColor: event.target.value })}
               className="rounded-md border border-white/10 bg-black/40 px-3 py-2 text-white focus:border-white/40 focus:outline-none"
               placeholder="rgba(0,0,0,0.35)"
             />
@@ -89,7 +97,7 @@ export default function SettingsPage() {
             <input
               type="checkbox"
               checked={subtitleStyle.outline}
-              onChange={(event) => updateStyle({ outline: event.target.checked })}
+              onChange={(event) => void updateStyle({ outline: event.target.checked })}
               className="h-4 w-4 rounded border-white/20 bg-black/60"
             />
             <span className="text-white/70">Outline text</span>
@@ -98,7 +106,7 @@ export default function SettingsPage() {
             <input
               type="checkbox"
               checked={subtitleStyle.shadow}
-              onChange={(event) => updateStyle({ shadow: event.target.checked })}
+              onChange={(event) => void updateStyle({ shadow: event.target.checked })}
               className="h-4 w-4 rounded border-white/20 bg-black/60"
             />
             <span className="text-white/70">Drop shadow</span>
@@ -114,7 +122,7 @@ export default function SettingsPage() {
             <input
               type="color"
               value={highlightColors.exact}
-              onChange={(event) => updateHighlights({ exact: event.target.value })}
+              onChange={(event) => void updateHighlights({ exact: event.target.value })}
               className="h-10 w-full cursor-pointer rounded-md border border-white/10 bg-black/40"
             />
           </label>
@@ -123,7 +131,7 @@ export default function SettingsPage() {
             <input
               type="color"
               value={highlightColors.variant}
-              onChange={(event) => updateHighlights({ variant: event.target.value })}
+              onChange={(event) => void updateHighlights({ variant: event.target.value })}
               className="h-10 w-full cursor-pointer rounded-md border border-white/10 bg-black/40"
             />
           </label>

@@ -17,8 +17,8 @@ Focus development on the unfinished pieces below.
 
 ### MVP checklist
 
-- [ ] Allow loading a local video file and render subtitles in a custom overlay positioned on top of playback.
-- [ ] Move dictionary, subtitle files, and preferences into Dexie-backed storage (schema + repositories).
+- [x] Allow loading a local video file and render subtitles in a custom overlay positioned on top of playback.
+- [x] Move dictionary, subtitle files, and preferences into Dexie-backed storage (schema + repositories).
 - [ ] Build a word management table that supports editing translation/notes, updating status, and deleting entries.
 - [ ] Support export/import of the unknown words list as JSON (and optional CSV).
 - [ ] Wire up a worker to parse + tokenize SRT files without blocking the UI and keep cached tokens per cue.

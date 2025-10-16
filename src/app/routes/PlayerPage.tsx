@@ -3,6 +3,8 @@ import { useDictionaryStore } from "../../state/dictionaryStore";
 import { Cue, Token } from "../../core/types";
 import { tokenize } from "../../core/nlp/tokenize";
 import { parseSrt } from "../../core/parsing/srtParser";
+import { hashBlob } from "../../utils/file";
+import { upsertSubtitleFile } from "../../data/filesRepo";
 
 function formatTime(ms: number) {
   const totalSeconds = Math.floor(ms / 1000);
@@ -54,6 +56,14 @@ export default function PlayerPage() {
   const [currentTimeMs, setCurrentTimeMs] = useState<number>(0);
   const addWord = useDictionaryStore((state) => state.addUnknownWordFromToken);
   const classForToken = useDictionaryStore((state) => state.classForToken);
+  const initializeDictionary = useDictionaryStore((state) => state.initialize);
+  const dictionaryReady = useDictionaryStore((state) => state.initialized);
+
+  useEffect(() => {
+    if (!dictionaryReady) {
+      void initializeDictionary();
+    }
+  }, [dictionaryReady, initializeDictionary]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -92,15 +102,23 @@ export default function PlayerPage() {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    setSubtitleName(file.name);
     const text = await file.text();
     const parsedCues = parseSrt(text);
+    const hash = await hashBlob(file);
 
+    setSubtitleName(file.name);
     setCues(parsedCues);
     setCurrentTimeMs(0);
+
     if (videoRef.current) {
       videoRef.current.currentTime = 0;
     }
+
+    await upsertSubtitleFile({
+      name: file.name,
+      bytesHash: hash,
+      totalCues: parsedCues.length,
+    });
   };
 
   const handleTimeUpdate = () => {
@@ -139,7 +157,7 @@ export default function PlayerPage() {
                       cue={cue}
                       classForToken={classForToken}
                       onTokenClick={(token) => {
-                        addWord(token);
+                        void addWord(token);
                       }}
                       className="justify-center text-center"
                     />
@@ -172,7 +190,7 @@ export default function PlayerPage() {
                     cue={cue}
                     classForToken={classForToken}
                     onTokenClick={(token) => {
-                      addWord(token);
+                      void addWord(token);
                     }}
                   />
                 </div>

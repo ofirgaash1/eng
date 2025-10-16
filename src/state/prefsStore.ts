@@ -1,11 +1,13 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
 import type { UserPrefs } from "../core/types";
+import { getPrefs, savePrefs } from "../data/prefsRepo";
 
 interface PrefsState {
   prefs: UserPrefs;
-  updateSubtitleStyle: (updates: Partial<UserPrefs["subtitleStyle"]>) => void;
-  updateHighlightColors: (updates: Partial<UserPrefs["highlightColors"]>) => void;
+  initialized: boolean;
+  initialize: () => Promise<void>;
+  updateSubtitleStyle: (updates: Partial<UserPrefs["subtitleStyle"]>) => Promise<void>;
+  updateHighlightColors: (updates: Partial<UserPrefs["highlightColors"]>) => Promise<void>;
 }
 
 const defaultPrefs: UserPrefs = {
@@ -25,28 +27,28 @@ const defaultPrefs: UserPrefs = {
   },
 };
 
-export const usePrefsStore = create<PrefsState>()(
-  persist(
-    (set) => ({
-      prefs: defaultPrefs,
-      updateSubtitleStyle: (updates) =>
-        set((state) => ({
-          prefs: {
-            ...state.prefs,
-            subtitleStyle: { ...state.prefs.subtitleStyle, ...updates },
-          },
-        })),
-      updateHighlightColors: (updates) =>
-        set((state) => ({
-          prefs: {
-            ...state.prefs,
-            highlightColors: { ...state.prefs.highlightColors, ...updates },
-          },
-        })),
-    }),
-    {
-      name: "prefs-store",
-      version: 1,
-    }
-  )
-);
+export const usePrefsStore = create<PrefsState>((set, get) => ({
+  prefs: defaultPrefs,
+  initialized: false,
+  initialize: async () => {
+    if (get().initialized) return;
+    const stored = await getPrefs();
+    set({ prefs: stored ?? defaultPrefs, initialized: true });
+  },
+  updateSubtitleStyle: async (updates) => {
+    const next: UserPrefs = {
+      ...get().prefs,
+      subtitleStyle: { ...get().prefs.subtitleStyle, ...updates },
+    };
+    set({ prefs: next });
+    await savePrefs(next);
+  },
+  updateHighlightColors: async (updates) => {
+    const next: UserPrefs = {
+      ...get().prefs,
+      highlightColors: { ...get().prefs.highlightColors, ...updates },
+    };
+    set({ prefs: next });
+    await savePrefs(next);
+  },
+}));

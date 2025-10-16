@@ -1,12 +1,30 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useDictionaryStore } from "../../state/dictionaryStore";
 
 export default function WordsPage() {
   const words = useDictionaryStore((state) => state.words);
+  const initialized = useDictionaryStore((state) => state.initialized);
+  const initialize = useDictionaryStore((state) => state.initialize);
+
+  useEffect(() => {
+    if (!initialized) {
+      void initialize();
+    }
+  }, [initialized, initialize]);
+
   const sorted = useMemo(
     () => [...words].sort((a, b) => b.updatedAt - a.updatedAt),
     [words]
   );
+
+  if (!initialized) {
+    return (
+      <div className="space-y-4">
+        <h2 className="text-xl font-semibold">Unknown Words</h2>
+        <p className="text-sm text-white/60">Loading your saved vocabulary…</p>
+      </div>
+    );
+  }
 
   if (sorted.length === 0) {
     return (

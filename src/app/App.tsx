@@ -15,6 +15,14 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
 export default function App() {
   const subtitleStyle = usePrefsStore((state) => state.prefs.subtitleStyle);
   const highlightColors = usePrefsStore((state) => state.prefs.highlightColors);
+  const initializePrefs = usePrefsStore((state) => state.initialize);
+  const prefsReady = usePrefsStore((state) => state.initialized);
+
+  useEffect(() => {
+    if (!prefsReady) {
+      void initializePrefs();
+    }
+  }, [prefsReady, initializePrefs]);
 
   useEffect(() => {
     const root = document.documentElement.style;
