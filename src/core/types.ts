@@ -29,6 +29,11 @@ export interface Cue {
   tokens?: Token[];
 }
 
+export interface SubtitleCueRecord extends Cue {
+  id: string;
+  fileHash: string;
+}
+
 export interface Token {
   text: string;
   normalized: string;
@@ -55,4 +60,14 @@ export interface UserPrefs {
     videoName?: string;
     srtName?: string;
   };
+}
+
+export interface RecentSessionRecord {
+  id: string;
+  videoName?: string;
+  videoBlob?: Blob;
+  subtitleName?: string;
+  subtitleText?: string;
+  subtitleHash?: string;
+  updatedAt: number;
 }

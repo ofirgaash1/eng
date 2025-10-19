@@ -19,10 +19,10 @@ Focus development on the unfinished pieces below.
 
 - [x] Allow loading a local video file and render subtitles in a custom overlay positioned on top of playback.
 - [x] Move dictionary, subtitle files, and preferences into Dexie-backed storage (schema + repositories).
-- [ ] Build a word management table that supports editing translation/notes, updating status, and deleting entries.
-- [ ] Support export/import of the unknown words list as JSON (and optional CSV).
-- [ ] Wire up a worker to parse + tokenize SRT files without blocking the UI and keep cached tokens per cue.
-- [ ] Persist and restore the most recently opened video/subtitle combination.
+- [x] Build a word management table that supports editing translation/notes, updating status, and deleting entries.
+- [x] Support export/import of the unknown words list as JSON (and optional CSV).
+- [x] Wire up a worker to parse + tokenize SRT files without blocking the UI and keep cached tokens per cue.
+- [x] Persist and restore the most recently opened video/subtitle combination.
 
 ### Nice-to-haves
 

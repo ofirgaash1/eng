@@ -8,6 +8,7 @@ interface PrefsState {
   initialize: () => Promise<void>;
   updateSubtitleStyle: (updates: Partial<UserPrefs["subtitleStyle"]>) => Promise<void>;
   updateHighlightColors: (updates: Partial<UserPrefs["highlightColors"]>) => Promise<void>;
+  setLastOpened: (input: UserPrefs["lastOpened"]) => Promise<void>;
 }
 
 const defaultPrefs: UserPrefs = {
@@ -47,6 +48,14 @@ export const usePrefsStore = create<PrefsState>((set, get) => ({
     const next: UserPrefs = {
       ...get().prefs,
       highlightColors: { ...get().prefs.highlightColors, ...updates },
+    };
+    set({ prefs: next });
+    await savePrefs(next);
+  },
+  setLastOpened: async (input) => {
+    const next: UserPrefs = {
+      ...get().prefs,
+      lastOpened: input,
     };
     set({ prefs: next });
     await savePrefs(next);

@@ -1,10 +1,20 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+} from "react";
 import { useDictionaryStore } from "../../state/dictionaryStore";
-import { Cue, Token } from "../../core/types";
+import { usePrefsStore } from "../../state/prefsStore";
+import type { Cue, Token } from "../../core/types";
 import { tokenize } from "../../core/nlp/tokenize";
-import { parseSrt } from "../../core/parsing/srtParser";
 import { hashBlob } from "../../utils/file";
 import { upsertSubtitleFile } from "../../data/filesRepo";
+import { getCuesForFile, saveCuesForFile } from "../../data/cuesRepo";
+import { getLastSession, saveLastSession } from "../../data/sessionRepo";
+import { parseSrt } from "../../core/parsing/srtParser";
 
 function formatTime(ms: number) {
   const totalSeconds = Math.floor(ms / 1000);
@@ -21,6 +31,12 @@ interface SubtitleCueProps {
   classForToken: (token: Token) => string;
   className?: string;
 }
+
+type WorkerResponse = {
+  id: string;
+  cues: Cue[];
+  error?: string;
+};
 
 function SubtitleCue({ cue, onTokenClick, classForToken, className }: SubtitleCueProps) {
   const tokens = useMemo(() => cue.tokens ?? tokenize(cue.rawText), [cue]);
@@ -49,15 +65,30 @@ function SubtitleCue({ cue, onTokenClick, classForToken, className }: SubtitleCu
 
 export default function PlayerPage() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const workerRef = useRef<Worker | null>(null);
+  const pendingParseRef = useRef<{ id: string; hash: string; fileName: string } | null>(null);
   const [videoName, setVideoName] = useState<string>("");
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [subtitleName, setSubtitleName] = useState<string>("");
   const [cues, setCues] = useState<Cue[]>([]);
   const [currentTimeMs, setCurrentTimeMs] = useState<number>(0);
+  const [subtitleLoading, setSubtitleLoading] = useState<boolean>(false);
+  const [subtitleError, setSubtitleError] = useState<string | null>(null);
   const addWord = useDictionaryStore((state) => state.addUnknownWordFromToken);
   const classForToken = useDictionaryStore((state) => state.classForToken);
   const initializeDictionary = useDictionaryStore((state) => state.initialize);
   const dictionaryReady = useDictionaryStore((state) => state.initialized);
+  const initializePrefs = usePrefsStore((state) => state.initialize);
+  const prefsInitialized = usePrefsStore((state) => state.initialized);
+  const setLastOpened = usePrefsStore((state) => state.setLastOpened);
+
+  const applyParsedCues = useCallback(async (hash: string, fileName: string, parsed: Cue[]) => {
+    setCues(parsed);
+    await Promise.all([
+      saveCuesForFile(hash, parsed),
+      upsertSubtitleFile({ name: fileName, bytesHash: hash, totalCues: parsed.length }),
+    ]);
+  }, []);
 
   useEffect(() => {
     if (!dictionaryReady) {
@@ -66,60 +97,257 @@ export default function PlayerPage() {
   }, [dictionaryReady, initializeDictionary]);
 
   useEffect(() => {
+    if (!prefsInitialized) {
+      void initializePrefs();
+    }
+  }, [prefsInitialized, initializePrefs]);
+
+  useEffect(() => {
+    const worker = new Worker(new URL("../../workers/srtWorker.ts", import.meta.url), {
+      type: "module",
+    });
+    workerRef.current = worker;
+    return () => {
+      worker.terminate();
+      workerRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const worker = workerRef.current;
+    if (!worker) return;
+
+    const handleMessage = async (event: MessageEvent<WorkerResponse>) => {
+      const pending = pendingParseRef.current;
+      if (!pending || event.data.id !== pending.id) return;
+      pendingParseRef.current = null;
+
+      if (event.data.error) {
+        setSubtitleError(event.data.error);
+        setSubtitleLoading(false);
+        return;
+      }
+
+      try {
+        setSubtitleError(null);
+        await applyParsedCues(pending.hash, pending.fileName, event.data.cues);
+      } catch (error) {
+        console.error(error);
+        setSubtitleError("Failed to store parsed subtitles.");
+      } finally {
+        setSubtitleLoading(false);
+      }
+    };
+
+    worker.addEventListener("message", handleMessage);
+    return () => {
+      worker.removeEventListener("message", handleMessage);
+    };
+  }, [applyParsedCues]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const restoreSession = async () => {
+      const session = await getLastSession();
+      if (cancelled || !session) {
+        return;
+      }
+
+      if (session.videoBlob) {
+        const blob = session.videoBlob;
+        setVideoUrl((previous) => {
+          if (previous) {
+            URL.revokeObjectURL(previous);
+          }
+          return URL.createObjectURL(blob);
+        });
+        setVideoName(session.videoName ?? "");
+      } else if (session.videoName) {
+        setVideoName(session.videoName);
+      }
+
+      if (session.subtitleName) {
+        setSubtitleName(session.subtitleName);
+      }
+      if (!session.subtitleHash) {
+        return;
+      }
+
+      setSubtitleLoading(true);
+      setSubtitleError(null);
+      const cached = await getCuesForFile(session.subtitleHash);
+      if (cancelled) {
+        return;
+      }
+
+      if (cached) {
+        setCues(cached);
+        setSubtitleLoading(false);
+        await upsertSubtitleFile({
+          name: session.subtitleName ?? session.subtitleHash,
+          bytesHash: session.subtitleHash,
+          totalCues: cached.length,
+        });
+        return;
+      }
+
+      if (!session.subtitleText) {
+        setSubtitleLoading(false);
+        return;
+      }
+
+      const worker = workerRef.current;
+      if (worker) {
+        const requestId = crypto.randomUUID();
+        pendingParseRef.current = {
+          id: requestId,
+          hash: session.subtitleHash,
+          fileName: session.subtitleName ?? session.subtitleHash,
+        };
+        worker.postMessage({ id: requestId, text: session.subtitleText });
+        return;
+      }
+
+      try {
+        const parsed = parseSrt(session.subtitleText).map((cue) => ({
+          ...cue,
+          tokens: cue.tokens ?? tokenize(cue.rawText),
+        }));
+        await applyParsedCues(
+          session.subtitleHash,
+          session.subtitleName ?? session.subtitleHash,
+          parsed,
+        );
+      } catch (error) {
+        if (!cancelled) {
+          setSubtitleError(error instanceof Error ? error.message : "Failed to parse subtitles");
+          setCues([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setSubtitleLoading(false);
+        }
+      }
+    };
+
+    void restoreSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [applyParsedCues]);
+  useEffect(() => {
+    if (!videoUrl) return;
+    return () => {
+      URL.revokeObjectURL(videoUrl);
+    };
+  }, [videoUrl]);
+
+  useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
     video.currentTime = 0;
   }, [videoUrl]);
 
   useEffect(() => {
-    if (!videoUrl) return undefined;
-    return () => {
-      URL.revokeObjectURL(videoUrl);
-    };
-  }, [videoUrl]);
+    if (!prefsInitialized) return;
+    const hasData = videoName || subtitleName;
+    void setLastOpened(
+      hasData
+        ? {
+            videoName: videoName || undefined,
+            srtName: subtitleName || undefined,
+          }
+        : undefined,
+    );
+  }, [prefsInitialized, setLastOpened, subtitleName, videoName]);
 
-  const handleVideoUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  const resetPlayback = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.pause();
+    video.currentTime = 0;
+  }, []);
 
-    setVideoName(file.name);
-    setCurrentTimeMs(0);
+  const handleVideoUpload = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
 
-    if (videoRef.current) {
-      videoRef.current.pause();
-      videoRef.current.currentTime = 0;
-    }
+      resetPlayback();
+      setVideoName(file.name);
+      setCurrentTimeMs(0);
+      setVideoUrl((previous) => {
+        if (previous) {
+          URL.revokeObjectURL(previous);
+        }
+        return URL.createObjectURL(file);
+      });
 
-    setVideoUrl((previous) => {
-      if (previous) {
-        URL.revokeObjectURL(previous);
+      void saveLastSession({ videoName: file.name, videoBlob: file });
+      event.target.value = "";
+    },
+    [resetPlayback],
+  );
+
+  const handleSubtitleUpload = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+
+      resetPlayback();
+      setSubtitleError(null);
+      setSubtitleLoading(true);
+      setCurrentTimeMs(0);
+      const text = await file.text();
+      const hash = await hashBlob(file);
+
+      pendingParseRef.current = null;
+      setSubtitleName(file.name);
+      setCues([]);
+
+      void saveLastSession({
+        subtitleName: file.name,
+        subtitleText: text,
+        subtitleHash: hash,
+      });
+
+      const cached = await getCuesForFile(hash);
+      if (cached) {
+        setCues(cached);
+        setSubtitleLoading(false);
+        await upsertSubtitleFile({ name: file.name, bytesHash: hash, totalCues: cached.length });
+        event.target.value = "";
+        return;
       }
-      return URL.createObjectURL(file);
-    });
-  };
 
-  const handleSubtitleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+      const worker = workerRef.current;
+      if (worker) {
+        const requestId = crypto.randomUUID();
+        pendingParseRef.current = { id: requestId, hash, fileName: file.name };
+        worker.postMessage({ id: requestId, text });
+        event.target.value = "";
+        return;
+      }
 
-    const text = await file.text();
-    const parsedCues = parseSrt(text);
-    const hash = await hashBlob(file);
+      try {
+        const parsed = parseSrt(text).map((cue) => ({
+          ...cue,
+          tokens: cue.tokens ?? tokenize(cue.rawText),
+        }));
+        await applyParsedCues(hash, file.name, parsed);
+      } catch (error) {
+        setSubtitleError(error instanceof Error ? error.message : "Failed to parse subtitles");
+        setCues([]);
+      } finally {
+        setSubtitleLoading(false);
+      }
 
-    setSubtitleName(file.name);
-    setCues(parsedCues);
-    setCurrentTimeMs(0);
-
-    if (videoRef.current) {
-      videoRef.current.currentTime = 0;
-    }
-
-    await upsertSubtitleFile({
-      name: file.name,
-      bytesHash: hash,
-      totalCues: parsedCues.length,
-    });
-  };
+      event.target.value = "";
+    },
+    [applyParsedCues, resetPlayback],
+  );
 
   const handleTimeUpdate = () => {
     const video = videoRef.current;
@@ -176,16 +404,26 @@ export default function PlayerPage() {
           <span className="font-medium">Load subtitles (SRT)</span>
           <input type="file" accept=".srt" className="hidden" onChange={handleSubtitleUpload} />
           <span className="text-xs text-white/60">Current: {subtitleName || "None"}</span>
+          {subtitleLoading && (
+            <span className="text-xs text-amber-300">Processing subtitles…</span>
+          )}
+          {subtitleError && (
+            <span className="text-xs text-red-400">{subtitleError}</span>
+          )}
         </label>
       </section>
       <aside className="space-y-4">
         <div className="rounded-lg bg-black/40 p-4">
           <h2 className="text-lg font-semibold">Active Cue</h2>
-          {activeCues.length > 0 ? (
+          {subtitleLoading ? (
+            <p className="mt-3 text-sm text-white/60">Processing subtitles…</p>
+          ) : activeCues.length > 0 ? (
             <div className="mt-3 space-y-2 text-sm">
               {activeCues.map((cue) => (
                 <div key={`${cue.startMs}-${cue.endMs}`} className="space-y-2">
-                  <div className="text-white/60">{formatTime(cue.startMs)} – {formatTime(cue.endMs)}</div>
+                  <div className="text-white/60">
+                    {formatTime(cue.startMs)} – {formatTime(cue.endMs)}
+                  </div>
                   <SubtitleCue
                     cue={cue}
                     classForToken={classForToken}
