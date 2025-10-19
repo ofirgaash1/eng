@@ -64,6 +64,7 @@ function SubtitleCue({ cue, onTokenClick, classForToken, className }: SubtitleCu
 }
 
 export default function PlayerPage() {
+  const playerContainerRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const workerRef = useRef<Worker | null>(null);
   const pendingParseRef = useRef<{ id: string; hash: string; fileName: string } | null>(null);
@@ -74,6 +75,7 @@ export default function PlayerPage() {
   const [currentTimeMs, setCurrentTimeMs] = useState<number>(0);
   const [subtitleLoading, setSubtitleLoading] = useState<boolean>(false);
   const [subtitleError, setSubtitleError] = useState<string | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const addWord = useDictionaryStore((state) => state.addUnknownWordFromToken);
   const classForToken = useDictionaryStore((state) => state.classForToken);
   const initializeDictionary = useDictionaryStore((state) => state.initialize);
@@ -101,6 +103,46 @@ export default function PlayerPage() {
       void initializePrefs();
     }
   }, [prefsInitialized, initializePrefs]);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const container = playerContainerRef.current;
+      setIsFullscreen(document.fullscreenElement === container);
+    };
+
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    };
+  }, []);
+
+  const enterFullscreen = useCallback(async () => {
+    const container = playerContainerRef.current;
+    if (!container) return;
+    if (document.fullscreenElement === container) return;
+    try {
+      await container.requestFullscreen();
+    } catch (error) {
+      console.error("Failed to enter fullscreen", error);
+    }
+  }, []);
+
+  const exitFullscreen = useCallback(async () => {
+    if (!document.fullscreenElement) return;
+    try {
+      await document.exitFullscreen();
+    } catch (error) {
+      console.error("Failed to exit fullscreen", error);
+    }
+  }, []);
+
+  const toggleFullscreen = useCallback(() => {
+    if (isFullscreen) {
+      void exitFullscreen();
+      return;
+    }
+    void enterFullscreen();
+  }, [enterFullscreen, exitFullscreen, isFullscreen]);
 
   useEffect(() => {
     const worker = new Worker(new URL("../../workers/srtWorker.ts", import.meta.url), {
@@ -363,11 +405,26 @@ export default function PlayerPage() {
   return (
     <div className="grid gap-6 lg:grid-cols-[2fr,1fr]">
       <section className="space-y-4">
-        <div className="relative aspect-video overflow-hidden rounded-lg bg-black shadow-xl">
+        <div
+          ref={playerContainerRef}
+          className="relative aspect-video overflow-hidden rounded-lg bg-black shadow-xl"
+          onDoubleClick={toggleFullscreen}
+        >
+          <button
+            type="button"
+            className="absolute right-3 top-3 z-10 rounded bg-black/70 px-3 py-1 text-xs font-medium text-white transition hover:bg-black/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+            onClick={(event) => {
+              event.stopPropagation();
+              toggleFullscreen();
+            }}
+          >
+            {isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
+          </button>
           <video
             ref={videoRef}
             className="h-full w-full"
             controls
+            controlsList="nofullscreen"
             onTimeUpdate={handleTimeUpdate}
             src={videoUrl ?? undefined}
           >
