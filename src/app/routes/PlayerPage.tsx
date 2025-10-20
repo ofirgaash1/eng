@@ -426,11 +426,21 @@ export default function PlayerPage() {
 
       const target = event.target as HTMLElement | null;
       const tagName = target?.tagName;
-      if (tagName && ["INPUT", "TEXTAREA", "SELECT"].includes(tagName)) {
+      if (tagName && ["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(tagName)) {
         return;
       }
       if (target?.isContentEditable) {
         return;
+      }
+
+      const activeElement = document.activeElement;
+      if (activeElement) {
+        if (activeElement === video) {
+          return;
+        }
+        if (activeElement instanceof HTMLElement && video.contains(activeElement)) {
+          return;
+        }
       }
 
       switch (event.key) {
