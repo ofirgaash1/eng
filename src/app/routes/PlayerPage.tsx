@@ -312,6 +312,28 @@ export default function PlayerPage() {
     video.currentTime = 0;
   }, []);
 
+  const togglePlayback = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.paused) {
+      void video.play().catch((error) => {
+        console.error("Failed to play video", error);
+      });
+    } else {
+      video.pause();
+    }
+  }, []);
+
+  const seekBy = useCallback((deltaSeconds: number) => {
+    const video = videoRef.current;
+    if (!video) return;
+    const nextTime = Math.min(
+      Math.max(video.currentTime + deltaSeconds, 0),
+      Number.isFinite(video.duration) ? video.duration : Number.MAX_SAFE_INTEGER,
+    );
+    video.currentTime = nextTime;
+  }, []);
+
   const handleVideoUpload = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0];
@@ -396,6 +418,54 @@ export default function PlayerPage() {
     if (!video || cues.length === 0) return;
     setCurrentTimeMs(video.currentTime * 1000);
   };
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const video = videoRef.current;
+      if (!video) return;
+
+      const target = event.target as HTMLElement | null;
+      const tagName = target?.tagName;
+      if (tagName && ["INPUT", "TEXTAREA", "SELECT"].includes(tagName)) {
+        return;
+      }
+      if (target?.isContentEditable) {
+        return;
+      }
+
+      switch (event.key) {
+        case " ":
+        case "Spacebar": {
+          event.preventDefault();
+          togglePlayback();
+          break;
+        }
+        case "ArrowLeft": {
+          event.preventDefault();
+          seekBy(-5);
+          break;
+        }
+        case "ArrowRight": {
+          event.preventDefault();
+          seekBy(5);
+          break;
+        }
+        case "f":
+        case "F": {
+          event.preventDefault();
+          toggleFullscreen();
+          break;
+        }
+        default:
+          break;
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [seekBy, toggleFullscreen, togglePlayback]);
 
   const activeCues = useMemo(
     () => cues.filter((cue) => cue.startMs <= currentTimeMs && cue.endMs >= currentTimeMs),
