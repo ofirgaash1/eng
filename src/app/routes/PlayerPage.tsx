@@ -51,7 +51,13 @@ function SubtitleCue({ cue, onTokenClick, classForToken, className }: SubtitleCu
               ? "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
               : "cursor-default"
           }`}
-          onClick={() => token.isWord && onTokenClick(token)}
+          onClick={(event) => {
+            if (!token.isWord) return;
+            onTokenClick(token);
+            if (event.currentTarget instanceof HTMLElement) {
+              event.currentTarget.blur();
+            }
+          }}
           disabled={!token.isWord}
         >
           <span className={`rounded px-1 py-0.5 transition-colors ${classForToken(token)}`}>
@@ -74,6 +80,7 @@ export default function PlayerPage() {
   const [cues, setCues] = useState<Cue[]>([]);
   const [currentTimeMs, setCurrentTimeMs] = useState<number>(0);
   const [subtitleLoading, setSubtitleLoading] = useState<boolean>(false);
+  const [subtitleOffsetMs, setSubtitleOffsetMs] = useState<number>(0);
   const [subtitleError, setSubtitleError] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const addWord = useDictionaryStore((state) => state.addUnknownWordFromToken);
@@ -478,9 +485,18 @@ export default function PlayerPage() {
   }, [seekBy, toggleFullscreen, togglePlayback]);
 
   const activeCues = useMemo(
-    () => cues.filter((cue) => cue.startMs <= currentTimeMs && cue.endMs >= currentTimeMs),
-    [cues, currentTimeMs],
+    () =>
+      cues.filter((cue) => {
+        const adjustedStart = cue.startMs + subtitleOffsetMs;
+        const adjustedEnd = cue.endMs + subtitleOffsetMs;
+        return adjustedStart <= currentTimeMs && adjustedEnd >= currentTimeMs;
+      }),
+    [cues, currentTimeMs, subtitleOffsetMs],
   );
+
+  const adjustSubtitleOffset = useCallback((deltaMs: number) => {
+    setSubtitleOffsetMs((previous) => previous + deltaMs);
+  }, []);
 
   return (
     <div className="grid gap-6 lg:grid-cols-[2fr,1fr]">
@@ -496,6 +512,9 @@ export default function PlayerPage() {
             onClick={(event) => {
               event.stopPropagation();
               toggleFullscreen();
+              if (event.currentTarget instanceof HTMLElement) {
+                event.currentTarget.blur();
+              }
             }}
           >
             {isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
@@ -532,6 +551,39 @@ export default function PlayerPage() {
             </div>
           )}
         </div>
+        <div className="flex flex-wrap items-center gap-3 rounded-lg bg-white/5 p-3 text-sm text-white/80">
+          <span className="font-medium text-white">Subtitle timing</span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+              onClick={(event) => {
+                adjustSubtitleOffset(-500);
+                if (event.currentTarget instanceof HTMLElement) {
+                  event.currentTarget.blur();
+                }
+              }}
+            >
+              –0.5s
+            </button>
+            <button
+              type="button"
+              className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+              onClick={(event) => {
+                adjustSubtitleOffset(500);
+                if (event.currentTarget instanceof HTMLElement) {
+                  event.currentTarget.blur();
+                }
+              }}
+            >
+              +0.5s
+            </button>
+          </div>
+          <span className="text-xs text-white/60">
+            Offset: {subtitleOffsetMs >= 0 ? "+" : ""}
+            {(subtitleOffsetMs / 1000).toFixed(1)}s
+          </span>
+        </div>
         <label className="flex w-full cursor-pointer flex-col gap-2 rounded-lg border border-dashed border-white/20 bg-white/5 p-4 text-sm hover:border-white/40">
           <span className="font-medium">Load video</span>
           <input type="file" accept="video/*" className="hidden" onChange={handleVideoUpload} />
@@ -559,7 +611,9 @@ export default function PlayerPage() {
               {activeCues.map((cue) => (
                 <div key={`${cue.startMs}-${cue.endMs}`} className="space-y-2">
                   <div className="text-white/60">
-                    {formatTime(cue.startMs)} – {formatTime(cue.endMs)}
+                    {formatTime(Math.max(0, cue.startMs + subtitleOffsetMs))} – {formatTime(
+                      Math.max(0, cue.endMs + subtitleOffsetMs),
+                    )}
                   </div>
                   <SubtitleCue
                     cue={cue}
