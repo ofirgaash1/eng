@@ -6,7 +6,7 @@ Local-first tool for studying vocabulary while watching movies with subtitle fil
 
 The following slices are already implemented:
 
-- Vite + React + Tailwind scaffold with top-level routing between Player, Words, and Settings views.
+- Vite + React + Tailwind scaffold with top-level routing between Player, Words, Quotes, and Settings views.
 - Custom SRT parser and Unicode-aware tokenizer with a lightweight stemmer wrapper.
 - In-memory dictionary store that classifies tokens as exact or stem-based variants for highlighting.
 - Subtitle style controls with live preview and CSS variable syncing.
@@ -41,6 +41,7 @@ src/
     routes/
       PlayerPage.tsx         // video + overlay once implemented
       WordsPage.tsx          // dictionary table & editing UI
+      QuotesPage.tsx         // cross-file quote browser for unknown words
       SettingsPage.tsx       // subtitle style controls (done)
   core/
     parsing/srtParser.ts     // SRT → cues (done)

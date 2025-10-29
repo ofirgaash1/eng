@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { NavLink, Route, Routes } from "react-router-dom";
 import PlayerPage from "./routes/PlayerPage";
 import WordsPage from "./routes/WordsPage";
+import QuotesPage from "./routes/QuotesPage";
 import SettingsPage from "./routes/SettingsPage";
 import { usePrefsStore } from "../state/prefsStore";
 
@@ -50,6 +51,9 @@ export default function App() {
             <NavLink to="/words" className={navLinkClass}>
               Words
             </NavLink>
+            <NavLink to="/quotes" className={navLinkClass}>
+              Quotes
+            </NavLink>
             <NavLink to="/settings" className={navLinkClass}>
               Settings
             </NavLink>
@@ -59,6 +63,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<PlayerPage />} />
             <Route path="/words" element={<WordsPage />} />
+            <Route path="/quotes" element={<QuotesPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<PlayerPage />} />
           </Routes>

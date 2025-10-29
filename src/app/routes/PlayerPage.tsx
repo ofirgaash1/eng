@@ -47,9 +47,7 @@ function SubtitleCue({ cue, onTokenClick, classForToken, className }: SubtitleCu
           key={`${token.text}-${index}`}
           type="button"
           className={`rounded px-0.5 text-left ${
-            token.isWord
-              ? "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
-              : "cursor-default"
+            token.isWord ? "focus:outline-none focus-visible:outline-none" : "cursor-default"
           }`}
           onClick={(event) => {
             if (!token.isWord) return;
@@ -440,13 +438,16 @@ export default function PlayerPage() {
         return;
       }
 
-      const activeElement = document.activeElement;
+      const activeElement = document.activeElement as HTMLElement | null;
       if (activeElement) {
         if (activeElement === video) {
-          return;
-        }
-        if (activeElement instanceof HTMLElement && video.contains(activeElement)) {
-          return;
+          video.blur();
+        } else if (activeElement instanceof HTMLElement) {
+          if (activeElement.tagName === "BUTTON") {
+            activeElement.blur();
+          } else if (video.contains(activeElement)) {
+            video.blur();
+          }
         }
       }
 
@@ -508,7 +509,7 @@ export default function PlayerPage() {
         >
           <button
             type="button"
-            className="absolute right-3 top-3 z-10 rounded bg-black/70 px-3 py-1 text-xs font-medium text-white transition hover:bg-black/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+            className="absolute right-3 top-3 z-10 rounded bg-black/70 px-3 py-1 text-xs font-medium text-white transition hover:bg-black/80 focus:outline-none focus-visible:outline-none"
             onClick={(event) => {
               event.stopPropagation();
               toggleFullscreen();
@@ -521,11 +522,12 @@ export default function PlayerPage() {
           </button>
           <video
             ref={videoRef}
-            className="h-full w-full"
+            className="h-full w-full focus:outline-none focus-visible:outline-none"
             controls
             controlsList="nofullscreen"
             onTimeUpdate={handleTimeUpdate}
             src={videoUrl ?? undefined}
+            tabIndex={-1}
           >
             <track kind="subtitles" srcLang="en" label={subtitleName || "Subtitles"} />
           </video>
@@ -556,7 +558,7 @@ export default function PlayerPage() {
           <div className="flex items-center gap-2">
             <button
               type="button"
-              className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+              className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:outline-none"
               onClick={(event) => {
                 adjustSubtitleOffset(-500);
                 if (event.currentTarget instanceof HTMLElement) {
@@ -568,7 +570,7 @@ export default function PlayerPage() {
             </button>
             <button
               type="button"
-              className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+              className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:outline-none"
               onClick={(event) => {
                 adjustSubtitleOffset(500);
                 if (event.currentTarget instanceof HTMLElement) {
