@@ -86,7 +86,8 @@ All commands run entirely offline using the local Node environment.
 
 ## Deploying to GitHub Pages
 
-The build now defaults to relative asset paths, making it compatible with repository-hosted GitHub Pages sites. To publish:
+The build defaults to relative asset paths, so publishing the contents of `dist/` works for repositories served from
+`https://<user>.github.io/<repo>/` without extra configuration.
 
 1. Build the static bundle:
    ```bash
@@ -98,10 +99,13 @@ The build now defaults to relative asset paths, making it compatible with reposi
    ```
 3. In your repository settings on GitHub, enable Pages for the selected branch and the `/(root)` folder.
 
-If you need to serve the app from a different subpath, set the `VITE_DEPLOY_BASE` environment variable before building:
+When a GitHub Actions workflow runs with the `GITHUB_PAGES=true` flag, the Vite config automatically infers the correct base
+path from `GITHUB_REPOSITORY`, so assets resolve to `/<repo>/assets/...`. If you are building locally for a custom subpath,
+override the base explicitly:
 
 ```bash
 VITE_DEPLOY_BASE="/custom-path/" npm run build
 ```
 
-GitHub Pages will then host the SPA with correct asset references.
+> **Tip:** A blank white page after deployment usually means the base path doesn’t match the published URL. Double-check the
+> value supplied through `VITE_DEPLOY_BASE` (or clear it entirely for the default relative paths) and redeploy.
