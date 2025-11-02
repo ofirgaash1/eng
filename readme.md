@@ -84,22 +84,24 @@ src/
 
 All commands run entirely offline using the local Node environment.
 
-## Deploying to silence-remover.com/english
+## Deploying to GitHub Pages
 
-The Vite config sets the production base path to `/english/`, so the compiled assets can be hosted beneath that route on your existing `silence-remover` Nginx container.
+The build now defaults to relative asset paths, making it compatible with repository-hosted GitHub Pages sites. To publish:
 
 1. Build the static bundle:
    ```bash
    npm run build
    ```
-2. Copy the `dist/` directory to the server that backs `silence-remover.com` (for example, into `/usr/share/nginx/html/english`).
-3. Update the Nginx site configuration to route `/english` to those assets and fall back to `index.html` for client-side routing:
-   ```nginx
-   location /english/ {
-       alias /usr/share/nginx/html/english/;
-       try_files $uri $uri/ /english/index.html;
-   }
+2. Commit the contents of the `dist/` directory to a `gh-pages` branch (or your chosen publishing branch). For example:
+   ```bash
+   git subtree push --prefix dist origin gh-pages
    ```
-4. Reload Nginx or redeploy the `silence-remover` container so the new assets are served.
+3. In your repository settings on GitHub, enable Pages for the selected branch and the `/(root)` folder.
 
-With the DNS A record already pointing `silence-remover.com` to your machine, visiting `https://silence-remover.com/english` will now load the app.
+If you need to serve the app from a different subpath, set the `VITE_DEPLOY_BASE` environment variable before building:
+
+```bash
+VITE_DEPLOY_BASE="/custom-path/" npm run build
+```
+
+GitHub Pages will then host the SPA with correct asset references.
