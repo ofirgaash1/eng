@@ -83,3 +83,23 @@ src/
    ```
 
 All commands run entirely offline using the local Node environment.
+
+## Deploying to silence-remover.com/english
+
+The Vite config sets the production base path to `/english/`, so the compiled assets can be hosted beneath that route on your existing `silence-remover` Nginx container.
+
+1. Build the static bundle:
+   ```bash
+   npm run build
+   ```
+2. Copy the `dist/` directory to the server that backs `silence-remover.com` (for example, into `/usr/share/nginx/html/english`).
+3. Update the Nginx site configuration to route `/english` to those assets and fall back to `index.html` for client-side routing:
+   ```nginx
+   location /english/ {
+       alias /usr/share/nginx/html/english/;
+       try_files $uri $uri/ /english/index.html;
+   }
+   ```
+4. Reload Nginx or redeploy the `silence-remover` container so the new assets are served.
+
+With the DNS A record already pointing `silence-remover.com` to your machine, visiting `https://silence-remover.com/english` will now load the app.

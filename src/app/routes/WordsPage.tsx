@@ -333,6 +333,39 @@ export default function WordsPage() {
     URL.revokeObjectURL(url);
   }, [sorted]);
 
+  const handleCopyWords = useCallback(async () => {
+    const text = sorted.map((word) => word.original).join("\n");
+    if (text.trim() === "") {
+      setImportError(null);
+      setImportSuccess("No words available to copy.");
+      return;
+    }
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.setAttribute("readonly", "true");
+        textarea.style.position = "absolute";
+        textarea.style.left = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+      setImportError(null);
+      setImportSuccess(
+        `Copied ${sorted.length} word${sorted.length === 1 ? "" : "s"} to the clipboard.`,
+      );
+    } catch (error) {
+      console.error(error);
+      setImportSuccess(null);
+      setImportError("Failed to copy words to the clipboard.");
+    }
+  }, [setImportError, setImportSuccess, sorted]);
+
   const handleImport = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0];
@@ -391,6 +424,23 @@ export default function WordsPage() {
           </button>
           <button
             type="button"
+            onClick={() => {
+              void handleCopyWords();
+            }}
+            className="rounded bg-white/10 px-3 py-1 text-xs font-medium text-white hover:bg-white/20"
+          >
+            Copy Words
+          </button>
+          <a
+            href="https://chatgpt.com/share/6907d519-a7cc-8013-ad9b-86187c2608de"
+            target="_blank"
+            rel="noreferrer"
+            className="rounded bg-emerald-500/20 px-3 py-1 text-xs font-medium text-emerald-200 hover:bg-emerald-500/30"
+          >
+            Play with ChatGPT
+          </a>
+          <button
+            type="button"
             onClick={() => fileInputRef.current?.click()}
             className="rounded bg-white/10 px-3 py-1 text-xs font-medium text-white hover:bg-white/20"
             disabled={isImporting}
@@ -428,11 +478,28 @@ export default function WordsPage() {
           </button>
           <button
             type="button"
+            onClick={() => {
+              void handleCopyWords();
+            }}
+            className="rounded bg-white/10 px-3 py-1 text-xs font-medium text-white hover:bg-white/20"
+          >
+            Copy Words
+          </button>
+          <button
+            type="button"
             onClick={handleExportCsv}
             className="rounded bg-white/10 px-3 py-1 text-xs font-medium text-white hover:bg-white/20"
           >
             Export CSV
           </button>
+          <a
+            href="https://chatgpt.com/share/6907d519-a7cc-8013-ad9b-86187c2608de"
+            target="_blank"
+            rel="noreferrer"
+            className="rounded bg-emerald-500/20 px-3 py-1 text-xs font-medium text-emerald-200 hover:bg-emerald-500/30"
+          >
+            Play with ChatGPT
+          </a>
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
