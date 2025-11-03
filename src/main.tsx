@@ -5,8 +5,11 @@ import App from "./app/App";
 import "./index.css";
 
 const rawBase = import.meta.env.BASE_URL ?? "/";
+const resolvedBase = new URL(rawBase, window.location.href).pathname;
 const basename =
-  rawBase === "./" ? "/" : rawBase.replace(/\/+$/, "") || "/";
+  resolvedBase.length > 1 && resolvedBase.endsWith("/")
+    ? resolvedBase.slice(0, -1)
+    : resolvedBase;
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
