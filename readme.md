@@ -87,7 +87,9 @@ All commands run entirely offline using the local Node environment.
 ## Deploying to GitHub Pages
 
 The build defaults to relative asset paths, so publishing the contents of `dist/` works for repositories served from
-`https://<user>.github.io/<repo>/` without extra configuration.
+`https://<user>.github.io/<repo>/` without extra configuration. When the GitHub Pages build flag (`GITHUB_PAGES=true`) is
+present—as it is inside the official GitHub Actions workflow—the Vite base path automatically falls back to `/<repo>/` so
+assets resolve correctly from the repository’s subdirectory.
 
 1. Build the static bundle:
    ```bash
@@ -107,7 +109,8 @@ VITE_DEPLOY_BASE="/custom-path/" npm run build
 
 The override accepts either relative (`custom-path`) or absolute (`/custom-path/`) inputs and will normalize them with leading
 and trailing slashes. Leaving it unset falls back to fully relative asset URLs, which work for GitHub Pages repositories such
-as `https://<user>.github.io/<repo>/` and for any static file host that serves the bundle from a subfolder.
+as `https://<user>.github.io/<repo>/` and for any static file host that serves the bundle from a subfolder. The GitHub Pages
+auto-detected base only applies when no explicit override is provided.
 
 > **Tip:** A blank white page after deployment usually means the generated asset URLs don’t align with where the files were
 > uploaded. Rebuild without `VITE_DEPLOY_BASE` (or update the override to match the desired subpath) and redeploy.
