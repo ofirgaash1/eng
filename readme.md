@@ -99,13 +99,15 @@ The build defaults to relative asset paths, so publishing the contents of `dist/
    ```
 3. In your repository settings on GitHub, enable Pages for the selected branch and the `/(root)` folder.
 
-When a GitHub Actions workflow runs with the `GITHUB_PAGES=true` flag, the Vite config automatically infers the correct base
-path from `GITHUB_REPOSITORY`, so assets resolve to `/<repo>/assets/...`. If you are building locally for a custom subpath,
-override the base explicitly:
+If you need to publish the bundle under a deeper subdirectory, override the deploy base while building:
 
 ```bash
 VITE_DEPLOY_BASE="/custom-path/" npm run build
 ```
 
-> **Tip:** A blank white page after deployment usually means the base path doesn’t match the published URL. Double-check the
-> value supplied through `VITE_DEPLOY_BASE` (or clear it entirely for the default relative paths) and redeploy.
+The override accepts either relative (`custom-path`) or absolute (`/custom-path/`) inputs and will normalize them with leading
+and trailing slashes. Leaving it unset falls back to fully relative asset URLs, which work for GitHub Pages repositories such
+as `https://<user>.github.io/<repo>/` and for any static file host that serves the bundle from a subfolder.
+
+> **Tip:** A blank white page after deployment usually means the generated asset URLs don’t align with where the files were
+> uploaded. Rebuild without `VITE_DEPLOY_BASE` (or update the override to match the desired subpath) and redeploy.
