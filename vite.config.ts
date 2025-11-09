@@ -1,41 +1,31 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-const normalizeBase = (value: string | undefined | null) => {
-  if (!value || value === "./" || value === ".") {
-    return "./";
+/**
+ * Automatically determines the correct base path for Vite builds.
+ * Works both locally (base="./") and on GitHub Pages (base="/<repo>/").
+ */
+function getBase() {
+  // 1️⃣ Explicitly use env variable if provided
+  const explicit = process.env.VITE_DEPLOY_BASE;
+  if (explicit && explicit !== "." && explicit !== "./") {
+    return explicit.endsWith("/") ? explicit : `${explicit}/`;
   }
 
-  const trimmed = value.trim();
-  const withLeading =
-    trimmed.startsWith("/") || trimmed.startsWith("http")
-      ? trimmed
-      : `/${trimmed}`;
+  // 2️⃣ Detect GitHub Pages environment (either via Actions or local build)
+  const repo = process.env.GITHUB_REPOSITORY?.split("/")[1];
+  const isPages = process.env.GITHUB_PAGES === "true" || !!repo;
 
-  return withLeading.endsWith("/") ? withLeading : `${withLeading}/`;
-};
-
-const resolveBase = () => {
-  const explicit = normalizeBase(process.env.VITE_DEPLOY_BASE);
-  if (explicit !== "./") {
-    return explicit;
+  if (isPages && repo) {
+    return `/${repo}/`; // e.g., "/eng/"
   }
 
-  const isGitHubPages = process.env.GITHUB_PAGES === "true";
-  const repoName = process.env.GITHUB_REPOSITORY?.split("/")[1];
-
-  if (isGitHubPages && repoName) {
-    return normalizeBase(`/${repoName}/`);
-  }
-
+  // 3️⃣ Default for local dev
   return "./";
-};
+}
 
-const base = resolveBase();
-
-// https://vitejs.dev/config/
 export default defineConfig({
-  base,
+  base: getBase(),
   plugins: [react()],
   server: {
     port: 5173,
