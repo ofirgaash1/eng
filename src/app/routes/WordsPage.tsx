@@ -429,7 +429,7 @@ export default function WordsPage() {
             }}
             className="rounded bg-white/10 px-3 py-1 text-xs font-medium text-white hover:bg-white/20"
           >
-            Copy Words
+            Copy All
           </button>
           <a
             href="https://chatgpt.com/share/69110ae1-0894-8013-ab12-c4e78af73786"
