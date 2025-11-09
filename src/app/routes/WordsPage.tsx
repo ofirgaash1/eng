@@ -431,6 +431,7 @@ export default function WordsPage() {
           >
             Copy All
           </button>
+          <h1>Updated Build Test v4 — Deployed via PowerShell Script!</h1>
           <a
             href="https://chatgpt.com/share/69110ae1-0894-8013-ab12-c4e78af73786"
             target="_blank"
