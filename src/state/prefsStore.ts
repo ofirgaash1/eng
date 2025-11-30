@@ -9,6 +9,7 @@ interface PrefsState {
   updateSubtitleStyle: (updates: Partial<UserPrefs["subtitleStyle"]>) => Promise<void>;
   updateHighlightColors: (updates: Partial<UserPrefs["highlightColors"]>) => Promise<void>;
   setLastOpened: (input: UserPrefs["lastOpened"]) => Promise<void>;
+  setMediaLibrary: (input: UserPrefs["mediaLibrary"]) => Promise<void>;
 }
 
 const defaultPrefs: UserPrefs = {
@@ -26,6 +27,7 @@ const defaultPrefs: UserPrefs = {
     exact: "#10b981",
     variant: "#f97316",
   },
+  mediaLibrary: undefined,
 };
 
 export const usePrefsStore = create<PrefsState>((set, get) => ({
@@ -56,6 +58,14 @@ export const usePrefsStore = create<PrefsState>((set, get) => ({
     const next: UserPrefs = {
       ...get().prefs,
       lastOpened: input,
+    };
+    set({ prefs: next });
+    await savePrefs(next);
+  },
+  setMediaLibrary: async (input) => {
+    const next: UserPrefs = {
+      ...get().prefs,
+      mediaLibrary: input,
     };
     set({ prefs: next });
     await savePrefs(next);
