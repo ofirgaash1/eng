@@ -8,6 +8,7 @@ import {
 } from "react";
 import type { Cue, SubtitleFile, Token, UnknownWord } from "../../core/types";
 import { useDictionaryStore } from "../../state/dictionaryStore";
+import { usePrefsStore } from "../../state/prefsStore";
 import { listSubtitleFiles, upsertSubtitleFile, deleteSubtitleFile } from "../../data/filesRepo";
 import { getCuesForFile, saveCuesForFile } from "../../data/cuesRepo";
 import { hashBlob } from "../../utils/file";
@@ -26,6 +27,7 @@ type PendingRequest = {
 };
 
 const CONTEXT_OPTIONS = [0, 1, 2, 3];
+const VIDEO_EXTENSIONS = [".mp4", ".mkv", ".mov", ".avi", ".m4v", ".webm"];
 
 function formatTime(ms: number) {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
@@ -70,18 +72,32 @@ export default function QuotesPage() {
   const [error, setError] = useState<string | null>(null);
   const [cuesByHash, setCuesByHash] = useState<Record<string, Cue[]>>({});
   const [showSubtitleSources, setShowSubtitleSources] = useState<boolean>(true);
+  const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
+  const [playbackStatus, setPlaybackStatus] = useState<string | null>(null);
+  const [playbackRange, setPlaybackRange] = useState<{ startMs: number; endMs: number } | null>(null);
   const workerRef = useRef<Worker | null>(null);
   const pendingParsesRef = useRef<Map<string, PendingRequest>>(new Map());
+  const playbackVideoRef = useRef<HTMLVideoElement | null>(null);
 
   const dictionaryInitialized = useDictionaryStore((state) => state.initialized);
   const initializeDictionary = useDictionaryStore((state) => state.initialize);
   const words = useDictionaryStore((state) => state.words);
+  const prefsInitialized = usePrefsStore((state) => state.initialized);
+  const initializePrefs = usePrefsStore((state) => state.initialize);
+  const mediaLibrary = usePrefsStore((state) => state.prefs.mediaLibrary);
 
   useEffect(() => {
     if (!dictionaryInitialized) {
       void initializeDictionary();
     }
   }, [dictionaryInitialized, initializeDictionary]);
+
+  useEffect(() => {
+    if (!prefsInitialized) {
+      void initializePrefs();
+    }
+  }, [initializePrefs, prefsInitialized]);
 
   useEffect(() => {
     const worker = new Worker(new URL("../../workers/srtWorker.ts", import.meta.url), {
@@ -126,6 +142,108 @@ export default function QuotesPage() {
     });
   }, []);
 
+  const ensureLibraryAccess = useCallback(async () => {
+    if (!mediaLibrary?.handle) {
+      setPlaybackError("Select a media library folder in Settings to enable playback.");
+      return null;
+    }
+    try {
+      const queryPermission = (mediaLibrary.handle as FileSystemDirectoryHandle & {
+        queryPermission?: (options: unknown) => Promise<PermissionState>;
+        requestPermission?: (options: unknown) => Promise<PermissionState>;
+      }).queryPermission;
+      const requestPermission = (mediaLibrary.handle as FileSystemDirectoryHandle & {
+        requestPermission?: (options: unknown) => Promise<PermissionState>;
+      }).requestPermission;
+
+      if (!queryPermission || !requestPermission) {
+        return mediaLibrary.handle;
+      }
+
+      const permission = await queryPermission.call(mediaLibrary.handle, { mode: "read" });
+      if (permission === "granted") {
+        return mediaLibrary.handle;
+      }
+      if (permission === "denied") {
+        setPlaybackError("Folder access denied. Re-select the library and allow access.");
+        return null;
+      }
+      const next = await requestPermission.call(mediaLibrary.handle, { mode: "read" });
+      if (next === "granted") return mediaLibrary.handle;
+      setPlaybackError("Folder access denied. Re-select the library and allow access.");
+      return null;
+    } catch (error) {
+      setPlaybackError(error instanceof Error ? error.message : "Unable to use media library.");
+      return null;
+    }
+  }, [mediaLibrary]);
+
+  const findVideoHandle = useCallback(
+    async (baseName: string): Promise<FileSystemFileHandle | null> => {
+      const handle = await ensureLibraryAccess();
+      if (!handle) return null;
+      const target = baseName.toLowerCase();
+      const queue: FileSystemDirectoryHandle[] = [handle];
+
+      while (queue.length > 0) {
+        const current = queue.shift();
+        if (!current) continue;
+        const iterator = (current as FileSystemDirectoryHandle & {
+          values?: () => AsyncIterable<FileSystemDirectoryHandle | FileSystemFileHandle>;
+        }).values;
+        if (!iterator) continue;
+        for await (const entry of iterator.call(current)) {
+          if (entry.kind === "file") {
+            const lower = entry.name.toLowerCase();
+            if (VIDEO_EXTENSIONS.some((ext) => lower === `${target}${ext}`)) {
+              return entry as FileSystemFileHandle;
+            }
+          } else if (entry.kind === "directory") {
+            queue.push(entry as FileSystemDirectoryHandle);
+          }
+        }
+      }
+
+      return null;
+    },
+    [ensureLibraryAccess]
+  );
+
+  const handlePlayQuote = useCallback(
+    async (quote: QuoteResult) => {
+      setPlaybackError(null);
+      setPlaybackStatus("Searching for matching video…");
+      const baseName = quote.file.name.replace(/\.[^.]+$/, "");
+      try {
+        const fileHandle = await findVideoHandle(baseName);
+        if (!fileHandle) {
+          setPlaybackStatus(null);
+          setPlaybackError("No matching video found under the selected media library.");
+          return;
+        }
+        const file = await fileHandle.getFile();
+        const nextUrl = URL.createObjectURL(file);
+        setPlaybackUrl((current) => {
+          if (current) URL.revokeObjectURL(current);
+          return nextUrl;
+        });
+        setPlaybackRange({ startMs: quote.contextStartMs, endMs: quote.contextEndMs });
+        setPlaybackStatus(`Playing ${fileHandle.name}`);
+        queueMicrotask(() => {
+          const video = playbackVideoRef.current;
+          if (video) {
+            video.currentTime = quote.contextStartMs / 1000;
+            void video.play();
+          }
+        });
+      } catch (error) {
+        setPlaybackStatus(null);
+        setPlaybackError(error instanceof Error ? error.message : "Unable to play quote.");
+      }
+    },
+    [findVideoHandle]
+  );
+
   const refreshLibrary = useCallback(async () => {
     setLibraryLoading(true);
     try {
@@ -166,6 +284,31 @@ export default function QuotesPage() {
       cancelled = true;
     };
   }, [library]);
+
+  useEffect(() => {
+    return () => {
+      setPlaybackUrl((current) => {
+        if (current) {
+          URL.revokeObjectURL(current);
+        }
+        return null;
+      });
+    };
+  }, []);
+
+  useEffect(() => {
+    const video = playbackVideoRef.current;
+    if (!video || !playbackRange) return;
+    const handleTimeUpdate = () => {
+      if (playbackRange && video.currentTime * 1000 >= playbackRange.endMs) {
+        video.pause();
+      }
+    };
+    video.addEventListener("timeupdate", handleTimeUpdate);
+    return () => {
+      video.removeEventListener("timeupdate", handleTimeUpdate);
+    };
+  }, [playbackRange, playbackUrl]);
 
   const learningWords = useMemo(
     () => words.filter((word) => word.status === "learning"),
@@ -314,15 +457,22 @@ export default function QuotesPage() {
               <p className="text-sm text-white/60">Quotes are gathered from the files listed below.</p>
             </div>
             <div className="flex items-center gap-2">
-              {library.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setShowSubtitleSources((current) => !current)}
-                  className="rounded-md border border-white/20 bg-white/10 px-3 py-2 text-xs font-medium text-white transition hover:border-white/30 hover:bg-white/20 focus:outline-none focus-visible:outline-none"
-                >
-                  {showSubtitleSources ? "Collapse list" : `Expand list (${library.length})`}
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => setShowSubtitleSources((current) => !current)}
+                disabled={library.length === 0}
+                className={`rounded-md border px-3 py-2 text-xs font-medium text-white transition focus:outline-none focus-visible:outline-none ${
+                  library.length === 0
+                    ? "cursor-not-allowed border-white/10 bg-white/5 text-white/40"
+                    : "border-white/20 bg-white/10 hover:border-white/30 hover:bg-white/20"
+                }`}
+              >
+                {library.length === 0
+                  ? "No files yet"
+                  : showSubtitleSources
+                    ? "Collapse list"
+                    : `Expand list (${library.length})`}
+              </button>
               <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-dashed border-white/20 bg-white/5 px-3 py-2 text-sm text-white/80 transition hover:border-white/40">
                 <input type="file" accept=".srt" multiple className="hidden" onChange={handleAddFiles} />
                 <span className="font-medium">Add subtitles</span>
@@ -390,6 +540,36 @@ export default function QuotesPage() {
               </select>
             </label>
           </div>
+          <div className="mt-3 space-y-2 rounded-md border border-white/10 bg-black/40 p-3 text-sm text-white/80">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-medium text-white">Quote playback</span>
+              {playbackStatus && <span className="text-xs text-white/60">{playbackStatus}</span>}
+            </div>
+            {playbackUrl ? (
+              <video
+                ref={playbackVideoRef}
+                controls
+                className="w-full rounded border border-white/10"
+                src={playbackUrl}
+                onLoadedMetadata={() => {
+                  if (playbackRange && playbackVideoRef.current) {
+                    playbackVideoRef.current.currentTime = playbackRange.startMs / 1000;
+                  }
+                }}
+              />
+            ) : (
+              <p className="text-xs text-white/60">
+                Select a media library folder in Settings to enable quote playback. Matching videos will be looked up by subtitle
+                filename.
+              </p>
+            )}
+            {playbackRange && (
+              <p className="text-xs text-white/60">
+                Segment: {formatTime(playbackRange.startMs)} – {formatTime(playbackRange.endMs)}
+              </p>
+            )}
+            {playbackError && <p className="text-xs text-red-400">{playbackError}</p>}
+          </div>
           {!selectedWord ? (
             <p className="mt-3 text-sm text-white/60">Select a word to see how it appears across your subtitles.</p>
           ) : quotes.length === 0 ? (
@@ -400,9 +580,19 @@ export default function QuotesPage() {
                 <li key={quote.id} className="space-y-2 rounded-md border border-white/10 bg-white/5 p-3 text-sm text-white/80">
                   <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-white/60">
                     <span className="font-medium text-white">{quote.file.name}</span>
-                    <span>
-                      {formatTime(quote.contextStartMs)} – {formatTime(quote.contextEndMs)}
-                    </span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span>
+                        {formatTime(quote.contextStartMs)} – {formatTime(quote.contextEndMs)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => void handlePlayQuote(quote)}
+                        disabled={!mediaLibrary?.handle}
+                        className="rounded border border-white/20 bg-white/10 px-2 py-1 text-[11px] font-medium text-white transition hover:border-white/30 hover:bg-white/20 focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:border-white/10 disabled:text-white/40"
+                      >
+                        Play quote
+                      </button>
+                    </div>
                   </div>
                   <div className="space-y-1 rounded bg-black/40 p-2">
                     {quote.cues.map((cue, index) => (

@@ -615,7 +615,7 @@ export default function PlayerPage() {
           <span className="font-medium">Load video</span>
           <input
             type="file"
-            accept="video/*,.mkv"
+            accept="video/*,video/x-matroska,.mkv,.MKV"
             multiple
             className="hidden"
             onChange={handleVideoUpload}

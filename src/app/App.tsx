@@ -4,6 +4,7 @@ import PlayerPage from "./routes/PlayerPage";
 import WordsPage from "./routes/WordsPage";
 import QuotesPage from "./routes/QuotesPage";
 import SettingsPage from "./routes/SettingsPage";
+import StatsPage from "./routes/StatsPage";
 import { usePrefsStore } from "../state/prefsStore";
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
@@ -54,6 +55,9 @@ export default function App() {
             <NavLink to="/quotes" className={navLinkClass}>
               Quotes
             </NavLink>
+            <NavLink to="/stats" className={navLinkClass}>
+              Stats
+            </NavLink>
             <NavLink to="/settings" className={navLinkClass}>
               Settings
             </NavLink>
@@ -64,6 +68,7 @@ export default function App() {
             <Route path="/" element={<PlayerPage />} />
             <Route path="/words" element={<WordsPage />} />
             <Route path="/quotes" element={<QuotesPage />} />
+            <Route path="/stats" element={<StatsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<PlayerPage />} />
           </Routes>
