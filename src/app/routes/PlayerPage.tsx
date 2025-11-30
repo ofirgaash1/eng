@@ -339,32 +339,8 @@ export default function PlayerPage() {
     video.currentTime = nextTime;
   }, []);
 
-  const handleVideoUpload = useCallback(
-    async (event: ChangeEvent<HTMLInputElement>) => {
-      const file = event.target.files?.[0];
-      if (!file) return;
-
-      resetPlayback();
-      setVideoName(file.name);
-      setCurrentTimeMs(0);
-      setVideoUrl((previous) => {
-        if (previous) {
-          URL.revokeObjectURL(previous);
-        }
-        return URL.createObjectURL(file);
-      });
-
-      void saveLastSession({ videoName: file.name, videoBlob: file });
-      event.target.value = "";
-    },
-    [resetPlayback],
-  );
-
-  const handleSubtitleUpload = useCallback(
-    async (event: ChangeEvent<HTMLInputElement>) => {
-      const file = event.target.files?.[0];
-      if (!file) return;
-
+  const processSubtitleFile = useCallback(
+    async (file: File) => {
       resetPlayback();
       setSubtitleError(null);
       setSubtitleLoading(true);
@@ -387,7 +363,6 @@ export default function PlayerPage() {
         setCues(cached);
         setSubtitleLoading(false);
         await upsertSubtitleFile({ name: file.name, bytesHash: hash, totalCues: cached.length });
-        event.target.value = "";
         return;
       }
 
@@ -396,7 +371,6 @@ export default function PlayerPage() {
         const requestId = crypto.randomUUID();
         pendingParseRef.current = { id: requestId, hash, fileName: file.name };
         worker.postMessage({ id: requestId, text });
-        event.target.value = "";
         return;
       }
 
@@ -412,10 +386,61 @@ export default function PlayerPage() {
       } finally {
         setSubtitleLoading(false);
       }
+    },
+    [applyParsedCues, resetPlayback],
+  );
+
+  const handleVideoUpload = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const files = event.target.files;
+      if (!files || files.length === 0) return;
+
+      const fileArray = Array.from(files);
+      const videoFile = fileArray.find(
+        (candidate) =>
+          candidate.type.startsWith("video/") || candidate.name.toLowerCase().endsWith(".mkv"),
+      );
+      if (!videoFile) {
+        event.target.value = "";
+        return;
+      }
+
+      resetPlayback();
+      setVideoName(videoFile.name);
+      setCurrentTimeMs(0);
+      setVideoUrl((previous) => {
+        if (previous) {
+          URL.revokeObjectURL(previous);
+        }
+        return URL.createObjectURL(videoFile);
+      });
+
+      void saveLastSession({ videoName: videoFile.name, videoBlob: videoFile });
+
+      const baseName = videoFile.name.replace(/\.[^.]+$/, "").toLowerCase();
+      const matchingSubtitle = fileArray.find(
+        (candidate) => candidate.name.toLowerCase() === `${baseName}.srt` && candidate !== videoFile,
+      );
+
+      if (matchingSubtitle) {
+        await processSubtitleFile(matchingSubtitle);
+      }
 
       event.target.value = "";
     },
-    [applyParsedCues, resetPlayback],
+    [processSubtitleFile, resetPlayback],
+  );
+
+  const handleSubtitleUpload = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+
+      await processSubtitleFile(file);
+
+      event.target.value = "";
+    },
+    [processSubtitleFile],
   );
 
   const handleTimeUpdate = () => {
@@ -588,7 +613,14 @@ export default function PlayerPage() {
         </div>
         <label className="flex w-full cursor-pointer flex-col gap-2 rounded-lg border border-dashed border-white/20 bg-white/5 p-4 text-sm hover:border-white/40">
           <span className="font-medium">Load video</span>
-          <input type="file" accept="video/*" className="hidden" onChange={handleVideoUpload} />
+          <input
+            type="file"
+            accept="video/*,.mkv"
+            multiple
+            className="hidden"
+            onChange={handleVideoUpload}
+          />
+          <span className="text-xs text-white/60">Automatically pairs a matching .srt when selected together.</span>
           <span className="text-xs text-white/60">Current: {videoName || "None"}</span>
         </label>
         <label className="flex w-full cursor-pointer flex-col gap-2 rounded-lg border border-dashed border-white/20 bg-white/5 p-4 text-sm hover:border-white/40">
