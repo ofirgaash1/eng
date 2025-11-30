@@ -56,6 +56,11 @@ export interface UserPrefs {
     exact: string;
     variant: string;
   };
+  mediaLibrary?: {
+    handle?: FileSystemDirectoryHandle;
+    label?: string;
+    lastPromptedAt?: number;
+  };
   lastOpened?: {
     videoName?: string;
     srtName?: string;
