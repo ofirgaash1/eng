@@ -69,6 +69,7 @@ export default function QuotesPage() {
   const [processingFiles, setProcessingFiles] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [cuesByHash, setCuesByHash] = useState<Record<string, Cue[]>>({});
+  const [showSubtitleSources, setShowSubtitleSources] = useState<boolean>(true);
   const workerRef = useRef<Worker | null>(null);
   const pendingParsesRef = useRef<Map<string, PendingRequest>>(new Map());
 
@@ -282,9 +283,9 @@ export default function QuotesPage() {
           {learningWords.length === 0 ? (
             <p className="mt-3 text-sm text-white/60">Add words from the player to explore their quotes.</p>
           ) : (
-            <ul className="mt-3 space-y-2">
+            <div className="mt-3 max-h-[420px] space-y-2 overflow-y-auto pr-1">
               {learningWords.map((word) => (
-                <li key={word.id}>
+                <div key={word.id}>
                   <button
                     type="button"
                     onClick={() => handleSelectWord(word.id)}
@@ -299,9 +300,9 @@ export default function QuotesPage() {
                       {word.translation ? <span>{word.translation}</span> : <span>No translation yet</span>}
                     </div>
                   </button>
-                </li>
+                </div>
               ))}
-            </ul>
+            </div>
           )}
         </div>
       </section>
@@ -312,43 +313,64 @@ export default function QuotesPage() {
               <h2 className="text-lg font-semibold">Subtitle sources</h2>
               <p className="text-sm text-white/60">Quotes are gathered from the files listed below.</p>
             </div>
-            <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-dashed border-white/20 bg-white/5 px-3 py-2 text-sm text-white/80 transition hover:border-white/40">
-              <input type="file" accept=".srt" multiple className="hidden" onChange={handleAddFiles} />
-              <span className="font-medium">Add subtitles</span>
-            </label>
+            <div className="flex items-center gap-2">
+              {library.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowSubtitleSources((current) => !current)}
+                  className="rounded-md border border-white/20 bg-white/10 px-3 py-2 text-xs font-medium text-white transition hover:border-white/30 hover:bg-white/20 focus:outline-none focus-visible:outline-none"
+                >
+                  {showSubtitleSources ? "Collapse list" : `Expand list (${library.length})`}
+                </button>
+              )}
+              <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-dashed border-white/20 bg-white/5 px-3 py-2 text-sm text-white/80 transition hover:border-white/40">
+                <input type="file" accept=".srt" multiple className="hidden" onChange={handleAddFiles} />
+                <span className="font-medium">Add subtitles</span>
+              </label>
+            </div>
           </div>
           {processingFiles && (
             <p className="mt-3 text-xs text-white/50">Processing subtitle files…</p>
           )}
           {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
-          <ul className="mt-4 space-y-2">
-            {libraryLoading ? (
-              <li className="text-sm text-white/60">Loading files…</li>
-            ) : library.length === 0 ? (
-              <li className="text-sm text-white/60">No subtitle files stored yet.</li>
-            ) : (
-              library.map((file) => (
-                <li
-                  key={file.id}
-                  className="flex items-center justify-between rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/80"
-                >
-                  <div>
-                    <div className="font-medium text-white">{file.name}</div>
-                    <div className="text-xs text-white/50">
-                      {file.totalCues} cues · Added {new Date(file.addedAt).toLocaleString()}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveFile(file)}
-                    className="rounded bg-white/10 px-2 py-1 text-xs text-white transition hover:bg-white/20 focus:outline-none focus-visible:outline-none"
+          {showSubtitleSources ? (
+            <ul className="mt-4 max-h-64 space-y-2 overflow-y-auto pr-1">
+              {libraryLoading ? (
+                <li className="text-sm text-white/60">Loading files…</li>
+              ) : library.length === 0 ? (
+                <li className="text-sm text-white/60">No subtitle files stored yet.</li>
+              ) : (
+                library.map((file) => (
+                  <li
+                    key={file.id}
+                    className="flex items-center justify-between rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/80"
                   >
-                    Remove
-                  </button>
-                </li>
-              ))
-            )}
-          </ul>
+                    <div>
+                      <div className="font-medium text-white">{file.name}</div>
+                      <div className="text-xs text-white/50">
+                        {file.totalCues} cues · Added {new Date(file.addedAt).toLocaleString()}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveFile(file)}
+                      className="rounded bg-white/10 px-2 py-1 text-xs text-white transition hover:bg-white/20 focus:outline-none focus-visible:outline-none"
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))
+              )}
+            </ul>
+          ) : (
+            <p className="mt-4 text-sm text-white/70">
+              {libraryLoading
+                ? "Loading files…"
+                : library.length === 0
+                  ? "No subtitle files stored yet."
+                  : `${library.length} subtitle file${library.length === 1 ? "" : "s"} stored. Expand to manage them.`}
+            </p>
+          )}
         </div>
         <div className="rounded-lg bg-black/40 p-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
