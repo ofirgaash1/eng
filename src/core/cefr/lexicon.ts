@@ -1,11 +1,12 @@
 export type CefrLevel = "A1" | "A2" | "B1" | "B2" | "C1" | "C2";
+export type CefrBucket = CefrLevel | "Unknown";
 
 type Lexicon = Record<CefrLevel, Set<string>>;
 
 // Lightweight frequency-based word lists to provide a best-effort CEFR guess
 // without shipping a massive dictionary. These words are drawn from common CEFR
-// study lists and high-frequency corpora. Anything not matched will fall back
-// to a heuristic based on word length/complexity.
+// study lists and high-frequency corpora. Words not matched are labeled as
+// Unknown.
 export const levelLexicon: Lexicon = {
   A1: new Set(
     [

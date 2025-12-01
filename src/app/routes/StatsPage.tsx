@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { SubtitleFile, UnknownWord } from "../../core/types";
 import { estimateCefrLevel } from "../../core/cefr/estimateLevel";
-import type { CefrLevel } from "../../core/cefr/lexicon";
+import type { CefrBucket } from "../../core/cefr/lexicon";
 import { useDictionaryStore } from "../../state/dictionaryStore";
 import { listSubtitleFiles } from "../../data/filesRepo";
 import { getCuesForFile } from "../../data/cuesRepo";
@@ -12,13 +12,14 @@ function percentage(part: number, total: number) {
   return Math.round((part / total) * 1000) / 10;
 }
 
-const EMPTY_LEVEL_COUNTS: Record<CefrLevel, number> = {
+const EMPTY_LEVEL_COUNTS: Record<CefrBucket, number> = {
   A1: 0,
   A2: 0,
   B1: 0,
   B2: 0,
   C1: 0,
   C2: 0,
+  Unknown: 0,
 };
 
 export default function StatsPage() {
@@ -32,13 +33,13 @@ export default function StatsPage() {
   const [tokenStats, setTokenStats] = useState<{
     totalTokens: number;
     unknownTokens: number;
-    unknownByLevel: Record<CefrLevel, number>;
+    unknownByLevel: Record<CefrBucket, number>;
   }>({
     totalTokens: 0,
     unknownTokens: 0,
     unknownByLevel: { ...EMPTY_LEVEL_COUNTS },
   });
-  const [activeLevel, setActiveLevel] = useState<CefrLevel | null>(null);
+  const [activeLevel, setActiveLevel] = useState<CefrBucket | null>(null);
 
   useEffect(() => {
     if (!initialized) {
@@ -63,28 +64,29 @@ export default function StatsPage() {
   }, []);
 
   const cefrSummary = useMemo(() => {
-    const buckets: Record<CefrLevel, UnknownWord[]> = {
+    const buckets: Record<CefrBucket, UnknownWord[]> = {
       A1: [],
       A2: [],
       B1: [],
       B2: [],
       C1: [],
       C2: [],
+      Unknown: [],
     };
     for (const word of words) {
       const level = estimateCefrLevel(word);
       buckets[level].push(word);
     }
-    const counts = (Object.keys(buckets) as CefrLevel[]).reduce((acc, level) => {
+    const counts = (Object.keys(buckets) as CefrBucket[]).reduce((acc, level) => {
       acc[level] = buckets[level].length;
       return acc;
     }, { ...EMPTY_LEVEL_COUNTS });
-    const percents = (Object.keys(counts) as CefrLevel[]).reduce((acc, level) => {
+    const percents = (Object.keys(counts) as CefrBucket[]).reduce((acc, level) => {
       acc[level] = percentage(counts[level], words.length);
       return acc;
     }, { ...EMPTY_LEVEL_COUNTS });
 
-    const sortedBuckets = (Object.keys(buckets) as CefrLevel[]).reduce((acc, level) => {
+    const sortedBuckets = (Object.keys(buckets) as CefrBucket[]).reduce((acc, level) => {
       acc[level] = [...buckets[level]].sort((a, b) => a.original.localeCompare(b.original));
       return acc;
     }, buckets);
@@ -108,7 +110,7 @@ export default function StatsPage() {
       setAnalyzingLibrary(true);
       const normalizedMap = new Map<string, UnknownWord>();
       const stemMap = new Map<string, UnknownWord>();
-      const levelById = new Map<string, CefrLevel>();
+      const levelById = new Map<string, CefrBucket>();
 
       for (const word of words) {
         normalizedMap.set(word.normalized.toLowerCase(), word);
@@ -118,7 +120,7 @@ export default function StatsPage() {
 
       let totalTokens = 0;
       let unknownTokens = 0;
-      const unknownByLevel: Record<CefrLevel, number> = { ...EMPTY_LEVEL_COUNTS };
+      const unknownByLevel: Record<CefrBucket, number> = { ...EMPTY_LEVEL_COUNTS };
 
       for (const file of subtitleFiles) {
         const cues = await getCuesForFile(file.bytesHash);
@@ -203,7 +205,7 @@ export default function StatsPage() {
             )}
           </div>
           <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-3">
-            {(Object.keys(cefrSummary.counts) as CefrLevel[]).map((level) => (
+            {(Object.keys(cefrSummary.counts) as CefrBucket[]).map((level) => (
               <button
                 key={level}
                 type="button"
