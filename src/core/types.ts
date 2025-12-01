@@ -5,11 +5,8 @@ export interface UnknownWord {
   original: string;
   normalized: string;
   stem: string;
-  translation?: string;
-  notes?: string;
   createdAt: number;
   updatedAt: number;
-  status: "learning" | "known";
 }
 
 export interface SubtitleFile {

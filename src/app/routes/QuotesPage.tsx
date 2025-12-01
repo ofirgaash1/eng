@@ -29,6 +29,11 @@ type PendingRequest = {
 const CONTEXT_OPTIONS = [0, 1, 2, 3];
 const VIDEO_EXTENSIONS = [".mp4", ".mkv", ".mov", ".avi", ".m4v", ".webm"];
 
+export const UNKNOWN_LIST_DIMENSIONS = {
+  minHeight: "60vh",
+  maxHeight: "calc(100vh - 10rem)",
+};
+
 function formatTime(ms: number) {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
   const hours = Math.floor(totalSeconds / 3600);
@@ -310,24 +315,21 @@ export default function QuotesPage() {
     };
   }, [playbackRange, playbackUrl]);
 
-  const learningWords = useMemo(
-    () => words.filter((word) => word.status === "learning"),
-    [words]
-  );
+  const unknownWords = useMemo(() => words, [words]);
 
   useEffect(() => {
-    if (learningWords.length === 0) {
+    if (unknownWords.length === 0) {
       setSelectedWordId(null);
       return;
     }
-    if (!selectedWordId || !learningWords.some((word) => word.id === selectedWordId)) {
-      setSelectedWordId(learningWords[0].id);
+    if (!selectedWordId || !unknownWords.some((word) => word.id === selectedWordId)) {
+      setSelectedWordId(unknownWords[0].id);
     }
-  }, [learningWords, selectedWordId]);
+  }, [unknownWords, selectedWordId]);
 
   const selectedWord = useMemo(
-    () => learningWords.find((word) => word.id === selectedWordId) ?? null,
-    [learningWords, selectedWordId]
+    () => unknownWords.find((word) => word.id === selectedWordId) ?? null,
+    [unknownWords, selectedWordId]
   );
 
   const quotes = useMemo(() => {
@@ -423,11 +425,17 @@ export default function QuotesPage() {
       <section className="space-y-4">
         <div className="rounded-lg bg-black/40 p-4">
           <h2 className="text-lg font-semibold">Unknown words</h2>
-          {learningWords.length === 0 ? (
+          {unknownWords.length === 0 ? (
             <p className="mt-3 text-sm text-white/60">Add words from the player to explore their quotes.</p>
           ) : (
-            <div className="mt-3 max-h-[420px] space-y-2 overflow-y-auto pr-1">
-              {learningWords.map((word) => (
+            <div
+              className="mt-3 space-y-2 overflow-y-auto pr-1"
+              style={{
+                minHeight: UNKNOWN_LIST_DIMENSIONS.minHeight,
+                maxHeight: UNKNOWN_LIST_DIMENSIONS.maxHeight,
+              }}
+            >
+              {unknownWords.map((word) => (
                 <div key={word.id}>
                   <button
                     type="button"
@@ -439,9 +447,7 @@ export default function QuotesPage() {
                     }`}
                   >
                     <span className="text-sm font-medium text-white">{word.original}</span>
-                    <div className="text-xs text-white/60">
-                      {word.translation ? <span>{word.translation}</span> : <span>No translation yet</span>}
-                    </div>
+                    <div className="text-xs text-white/60">Tap to see contexts</div>
                   </button>
                 </div>
               ))}

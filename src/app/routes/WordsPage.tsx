@@ -19,19 +19,6 @@ function toImportedWord(value: unknown): ImportedUnknownWord | null {
   const stem = typeof record.stem === "string" ? record.stem.trim() : "";
   if (!normalized || !stem) return null;
 
-  const translation =
-    typeof record.translation === "string"
-      ? record.translation
-      : record.translation === null
-        ? null
-        : undefined;
-  const notes =
-    typeof record.notes === "string"
-      ? record.notes
-      : record.notes === null
-        ? null
-        : undefined;
-
   let createdAt: number | undefined;
   if (typeof record.createdAt === "number") {
     createdAt = record.createdAt;
@@ -52,10 +39,6 @@ function toImportedWord(value: unknown): ImportedUnknownWord | null {
     }
   }
 
-  const status = record.status === "known" || record.status === "learning"
-    ? (record.status as UnknownWord["status"])
-    : undefined;
-
   return {
     id: typeof record.id === "string" && record.id.trim() ? record.id.trim() : undefined,
     original:
@@ -64,11 +47,8 @@ function toImportedWord(value: unknown): ImportedUnknownWord | null {
         : undefined,
     normalized,
     stem,
-    translation,
-    notes,
     createdAt,
     updatedAt,
-    status,
   };
 }
 
@@ -142,107 +122,18 @@ function parseCsvWordList(text: string): ImportedUnknownWord[] {
   return records;
 }
 
-function escapeCsv(value: string | number | undefined): string {
-  if (value === undefined) return "";
-  const text = String(value);
-  if (/[",\n]/.test(text)) {
-    return `"${text.replace(/"/g, '""')}"`;
-  }
-  return text;
-}
-
 interface WordRowProps {
   word: UnknownWord;
-  onUpdate: (
-    id: string,
-    updates: Partial<Omit<UnknownWord, "id" | "createdAt">>,
-  ) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
 }
 
-function WordRow({ word, onUpdate, onDelete }: WordRowProps) {
-  const [translation, setTranslation] = useState<string>(word.translation ?? "");
-  const [notes, setNotes] = useState<string>(word.notes ?? "");
-  const [status, setStatus] = useState<UnknownWord["status"]>(word.status);
-
-  useEffect(() => {
-    setTranslation(word.translation ?? "");
-  }, [word.translation, word.id]);
-
-  useEffect(() => {
-    setNotes(word.notes ?? "");
-  }, [word.notes, word.id]);
-
-  useEffect(() => {
-    setStatus(word.status);
-  }, [word.status, word.id]);
-
-  const commitTranslation = useCallback(() => {
-    const trimmed = translation.trim();
-    const normalized = trimmed === "" ? undefined : trimmed;
-    if ((normalized ?? "") === (word.translation ?? "")) return;
-    void onUpdate(word.id, { translation: normalized });
-  }, [onUpdate, translation, word.id, word.translation]);
-
-  const commitNotes = useCallback(() => {
-    const trimmed = notes.trim();
-    const normalized = trimmed === "" ? undefined : trimmed;
-    if ((normalized ?? "") === (word.notes ?? "")) return;
-    void onUpdate(word.id, { notes: normalized });
-  }, [notes, onUpdate, word.id, word.notes]);
-
-  const handleStatusChange = useCallback(
-    (event: ChangeEvent<HTMLSelectElement>) => {
-      const nextStatus = event.target.value as UnknownWord["status"];
-      setStatus(nextStatus);
-      if (nextStatus !== word.status) {
-        void onUpdate(word.id, { status: nextStatus });
-      }
-    },
-    [onUpdate, word.id, word.status],
-  );
-
+function WordRow({ word, onDelete }: WordRowProps) {
   return (
     <tr className="hover:bg-white/5">
       <td className="px-4 py-2 font-medium">{word.original}</td>
       <td className="px-4 py-2 text-white/70">{word.normalized}</td>
       <td className="px-4 py-2 text-white/70">{word.stem}</td>
-      <td className="px-4 py-2">
-        <input
-          value={translation}
-          onChange={(event) => setTranslation(event.target.value)}
-          onBlur={commitTranslation}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              commitTranslation();
-              (event.currentTarget as HTMLInputElement).blur();
-            }
-          }}
-          className="w-full rounded-md bg-white/10 px-2 py-1 text-sm text-white focus:outline-none focus:ring-2 focus:ring-white/60"
-          placeholder="Add translation"
-        />
-      </td>
-      <td className="px-4 py-2">
-        <textarea
-          value={notes}
-          onChange={(event) => setNotes(event.target.value)}
-          onBlur={commitNotes}
-          rows={1}
-          className="w-full resize-y rounded-md bg-white/10 px-2 py-1 text-sm text-white focus:outline-none focus:ring-2 focus:ring-white/60"
-          placeholder="Add notes"
-        />
-      </td>
-      <td className="px-4 py-2 text-right">
-        <select
-          value={status}
-          onChange={handleStatusChange}
-          className="rounded-md bg-white/10 px-2 py-1 text-xs uppercase tracking-wide text-white focus:outline-none focus:ring-2 focus:ring-white/60"
-        >
-          <option value="learning">Learning</option>
-          <option value="known">Known</option>
-        </select>
-      </td>
+      <td className="px-4 py-2 text-right text-white/60">{new Date(word.updatedAt).toLocaleString()}</td>
       <td className="px-4 py-2 text-right">
         <button
           type="button"
@@ -266,7 +157,6 @@ export default function WordsPage() {
   const words = useDictionaryStore((state) => state.words);
   const initialized = useDictionaryStore((state) => state.initialized);
   const initialize = useDictionaryStore((state) => state.initialize);
-  const updateWord = useDictionaryStore((state) => state.updateWord);
   const removeWord = useDictionaryStore((state) => state.removeWord);
   const importWords = useDictionaryStore((state) => state.importWords);
 
@@ -289,44 +179,6 @@ export default function WordsPage() {
     const link = document.createElement("a");
     link.href = url;
     link.download = `unknown-words-${new Date().toISOString().split("T")[0]}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  }, [sorted]);
-
-  const handleExportCsv = useCallback(() => {
-    const headers = [
-      "original",
-      "normalized",
-      "stem",
-      "translation",
-      "notes",
-      "status",
-      "createdAt",
-      "updatedAt",
-      "id",
-    ];
-    const lines = sorted.map((word) =>
-      [
-        escapeCsv(word.original ?? ""),
-        escapeCsv(word.normalized),
-        escapeCsv(word.stem),
-        escapeCsv(word.translation ?? undefined),
-        escapeCsv(word.notes ?? undefined),
-        escapeCsv(word.status),
-        escapeCsv(word.createdAt),
-        escapeCsv(word.updatedAt),
-        escapeCsv(word.id),
-      ].join(","),
-    );
-    const blob = new Blob([headers.join(",") + "\n" + lines.join("\n")], {
-      type: "text/csv;charset=utf-8",
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `unknown-words-${new Date().toISOString().split("T")[0]}.csv`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -360,11 +212,10 @@ export default function WordsPage() {
         `Copied ${sorted.length} word${sorted.length === 1 ? "" : "s"} to the clipboard.`,
       );
     } catch (error) {
-      console.error(error);
       setImportSuccess(null);
-      setImportError("Failed to copy words to the clipboard.");
+      setImportError(error instanceof Error ? error.message : "Failed to copy words.");
     }
-  }, [setImportError, setImportSuccess, sorted]);
+  }, [sorted]);
 
   const handleImport = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
@@ -377,19 +228,13 @@ export default function WordsPage() {
 
       try {
         const text = await file.text();
-        const lowerName = file.name.toLowerCase();
-        const wordsToImport = lowerName.endsWith(".csv")
+        const incoming = file.name.endsWith(".csv")
           ? parseCsvWordList(text)
           : parseJsonWordList(text);
-
-        await importWords(wordsToImport);
-        setImportSuccess(
-          `Imported ${wordsToImport.length} word${wordsToImport.length === 1 ? "" : "s"}.`,
-        );
+        await importWords(incoming);
+        setImportSuccess(`Imported ${incoming.length} word${incoming.length === 1 ? "" : "s"}.`);
       } catch (error) {
-        setImportError(
-          error instanceof Error ? error.message : "Failed to import the provided file.",
-        );
+        setImportError(error instanceof Error ? error.message : "Failed to import words.");
       } finally {
         setIsImporting(false);
         event.target.value = "";
@@ -466,7 +311,7 @@ export default function WordsPage() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="text-xl font-semibold">Unknown Words</h2>
-          <p className="text-xs text-white/50">Edit translations, add notes, and track review status.</p>
+          <p className="text-xs text-white/50">Export your list or prune items you no longer need.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button
@@ -484,13 +329,6 @@ export default function WordsPage() {
             className="rounded bg-white/10 px-3 py-1 text-xs font-medium text-white hover:bg-white/20"
           >
             Copy Words
-          </button>
-          <button
-            type="button"
-            onClick={handleExportCsv}
-            className="rounded bg-white/10 px-3 py-1 text-xs font-medium text-white hover:bg-white/20"
-          >
-            Export CSV
           </button>
           <a
             href="https://chatgpt.com/share/69112ad9-3858-8013-a13d-061dd7661a56"
@@ -532,9 +370,7 @@ export default function WordsPage() {
               <th className="px-4 py-2">Word</th>
               <th className="px-4 py-2">Normalized</th>
               <th className="px-4 py-2">Stem</th>
-              <th className="px-4 py-2">Translation</th>
-              <th className="px-4 py-2">Notes</th>
-              <th className="px-4 py-2 text-right">Status</th>
+              <th className="px-4 py-2 text-right">Updated</th>
               <th className="px-4 py-2 text-right">Actions</th>
             </tr>
           </thead>
@@ -543,7 +379,6 @@ export default function WordsPage() {
               <WordRow
                 key={word.id}
                 word={word}
-                onUpdate={updateWord}
                 onDelete={removeWord}
               />
             ))}
