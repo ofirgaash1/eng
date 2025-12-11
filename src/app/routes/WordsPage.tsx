@@ -11,6 +11,13 @@ import {
   useDictionaryStore,
   type ImportedUnknownWord,
 } from "../../state/dictionaryStore";
+import {
+  getFrequencyRankForWord,
+  loadFrequencyRanks,
+} from "../../utils/frequencyRanks";
+
+type SortField = "alphabetical" | "updatedAt" | "frequencyRank";
+type SortDirection = "asc" | "desc";
 
 function toImportedWord(value: unknown): ImportedUnknownWord | null {
   if (!value || typeof value !== "object") return null;
@@ -124,15 +131,19 @@ function parseCsvWordList(text: string): ImportedUnknownWord[] {
 
 interface WordRowProps {
   word: UnknownWord;
+  frequencyRank: number | null;
   onDelete: (id: string) => Promise<void>;
 }
 
-function WordRow({ word, onDelete }: WordRowProps) {
+function WordRow({ word, frequencyRank, onDelete }: WordRowProps) {
   return (
     <tr className="hover:bg-white/5">
       <td className="px-4 py-2 font-medium">{word.original}</td>
       <td className="px-4 py-2 text-white/70">{word.normalized}</td>
       <td className="px-4 py-2 text-white/70">{word.stem}</td>
+      <td className="px-4 py-2 text-right text-white/70">
+        {typeof frequencyRank === "number" ? `#${frequencyRank.toLocaleString()}` : "—"}
+      </td>
       <td className="px-4 py-2 text-right text-white/60">{new Date(word.updatedAt).toLocaleString()}</td>
       <td className="px-4 py-2 text-right">
         <button
@@ -153,7 +164,12 @@ export default function WordsPage() {
   const [importError, setImportError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
+  const [isLoadingRanks, setIsLoadingRanks] = useState(false);
+  const [rankError, setRankError] = useState<string | null>(null);
+  const [sortField, setSortField] = useState<SortField>("updatedAt");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [frequencyRanks, setFrequencyRanks] = useState<Map<string, number> | null>(null);
   const words = useDictionaryStore((state) => state.words);
   const initialized = useDictionaryStore((state) => state.initialized);
   const initialize = useDictionaryStore((state) => state.initialize);
@@ -166,10 +182,70 @@ export default function WordsPage() {
     }
   }, [initialized, initialize]);
 
-  const sorted = useMemo(
-    () => [...words].sort((a, b) => b.updatedAt - a.updatedAt),
-    [words],
-  );
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoadingRanks(true);
+    setRankError(null);
+
+    loadFrequencyRanks()
+      .then((ranks) => {
+        if (!cancelled) {
+          setFrequencyRanks(ranks);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setRankError(error instanceof Error ? error.message : "Unable to load frequency list.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoadingRanks(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const ranksById = useMemo(() => {
+    const map = new Map<string, number | null>();
+    for (const word of words) {
+      map.set(word.id, getFrequencyRankForWord(word, frequencyRanks));
+    }
+    return map;
+  }, [frequencyRanks, words]);
+
+  const sorted = useMemo(() => {
+    const order = [...words];
+    const direction = sortDirection === "asc" ? 1 : -1;
+
+    order.sort((a, b) => {
+      if (sortField === "alphabetical") {
+        return (
+          a.normalized.localeCompare(b.normalized, undefined, { sensitivity: "base" }) * direction
+        );
+      }
+
+      if (sortField === "frequencyRank") {
+        const aRank = ranksById.get(a.id);
+        const bRank = ranksById.get(b.id);
+
+        const aValue = typeof aRank === "number" ? aRank : Number.POSITIVE_INFINITY;
+        const bValue = typeof bRank === "number" ? bRank : Number.POSITIVE_INFINITY;
+
+        if (aValue !== bValue) {
+          return sortDirection === "asc" ? aValue - bValue : bValue - aValue;
+        }
+        return a.normalized.localeCompare(b.normalized, undefined, { sensitivity: "base" });
+      }
+
+      return (a.updatedAt - b.updatedAt) * direction;
+    });
+
+    return order;
+  }, [ranksById, sortDirection, sortField, words]);
 
   const handleExportJson = useCallback(() => {
     const blob = new Blob([JSON.stringify(sorted, null, 2)], {
@@ -216,6 +292,15 @@ export default function WordsPage() {
       setImportError(error instanceof Error ? error.message : "Failed to copy words.");
     }
   }, [sorted]);
+
+  const handleSortFieldChange = useCallback((next: SortField) => {
+    setSortField(next);
+    if (next === "updatedAt") {
+      setSortDirection("desc");
+    } else {
+      setSortDirection("asc");
+    }
+  }, []);
 
   const handleImport = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
@@ -355,13 +440,40 @@ export default function WordsPage() {
           />
         </div>
       </div>
-      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-white/60">
-        <span>{sorted.length} items</span>
-        {importError ? (
-          <span className="text-red-400">{importError}</span>
-        ) : importSuccess ? (
-          <span className="text-emerald-400">{importSuccess}</span>
-        ) : null}
+      <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-white/60">
+        <div className="flex flex-wrap items-center gap-2">
+          <span>{sorted.length} items</span>
+          <label className="flex items-center gap-1">
+            <span>Sort</span>
+            <select
+              value={sortField}
+              onChange={(event) => {
+                handleSortFieldChange(event.target.value as SortField);
+              }}
+              className="rounded border border-white/10 bg-white/5 px-2 py-1 text-white"
+            >
+              <option value="updatedAt">Updated</option>
+              <option value="alphabetical">A-Z</option>
+              <option value="frequencyRank">Frequency Rank</option>
+            </select>
+          </label>
+          <button
+            type="button"
+            className="rounded border border-white/10 bg-white/5 px-2 py-1 text-white"
+            onClick={() => setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"))}
+          >
+            {sortDirection === "asc" ? "Ascending" : "Descending"}
+          </button>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          {isLoadingRanks && <span>Loading frequency ranks…</span>}
+          {rankError && <span className="text-amber-300">{rankError}</span>}
+          {importError ? (
+            <span className="text-red-400">{importError}</span>
+          ) : importSuccess ? (
+            <span className="text-emerald-400">{importSuccess}</span>
+          ) : null}
+        </div>
       </div>
       <div className="overflow-hidden rounded-lg border border-white/10">
         <table className="min-w-full divide-y divide-white/10">
@@ -370,6 +482,7 @@ export default function WordsPage() {
               <th className="px-4 py-2">Word</th>
               <th className="px-4 py-2">Normalized</th>
               <th className="px-4 py-2">Stem</th>
+              <th className="px-4 py-2 text-right">Frequency Rank</th>
               <th className="px-4 py-2 text-right">Updated</th>
               <th className="px-4 py-2 text-right">Actions</th>
             </tr>
@@ -379,6 +492,7 @@ export default function WordsPage() {
               <WordRow
                 key={word.id}
                 word={word}
+                frequencyRank={ranksById.get(word.id) ?? null}
                 onDelete={removeWord}
               />
             ))}
