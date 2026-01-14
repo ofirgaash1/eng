@@ -11,6 +11,13 @@ import {
   useDictionaryStore,
   type ImportedUnknownWord,
 } from "../../state/dictionaryStore";
+import {
+  getFrequencyRankForWord,
+  loadFrequencyRanks,
+} from "../../utils/frequencyRanks";
+
+type SortField = "alphabetical" | "updatedAt" | "frequencyRank";
+type SortDirection = "asc" | "desc";
 
 function toImportedWord(value: unknown): ImportedUnknownWord | null {
   if (!value || typeof value !== "object") return null;
@@ -18,19 +25,6 @@ function toImportedWord(value: unknown): ImportedUnknownWord | null {
   const normalized = typeof record.normalized === "string" ? record.normalized.trim() : "";
   const stem = typeof record.stem === "string" ? record.stem.trim() : "";
   if (!normalized || !stem) return null;
-
-  const translation =
-    typeof record.translation === "string"
-      ? record.translation
-      : record.translation === null
-        ? null
-        : undefined;
-  const notes =
-    typeof record.notes === "string"
-      ? record.notes
-      : record.notes === null
-        ? null
-        : undefined;
 
   let createdAt: number | undefined;
   if (typeof record.createdAt === "number") {
@@ -52,10 +46,6 @@ function toImportedWord(value: unknown): ImportedUnknownWord | null {
     }
   }
 
-  const status = record.status === "known" || record.status === "learning"
-    ? (record.status as UnknownWord["status"])
-    : undefined;
-
   return {
     id: typeof record.id === "string" && record.id.trim() ? record.id.trim() : undefined,
     original:
@@ -64,11 +54,8 @@ function toImportedWord(value: unknown): ImportedUnknownWord | null {
         : undefined,
     normalized,
     stem,
-    translation,
-    notes,
     createdAt,
     updatedAt,
-    status,
   };
 }
 
@@ -142,107 +129,22 @@ function parseCsvWordList(text: string): ImportedUnknownWord[] {
   return records;
 }
 
-function escapeCsv(value: string | number | undefined): string {
-  if (value === undefined) return "";
-  const text = String(value);
-  if (/[",\n]/.test(text)) {
-    return `"${text.replace(/"/g, '""')}"`;
-  }
-  return text;
-}
-
 interface WordRowProps {
   word: UnknownWord;
-  onUpdate: (
-    id: string,
-    updates: Partial<Omit<UnknownWord, "id" | "createdAt">>,
-  ) => Promise<void>;
+  frequencyRank: number | null;
   onDelete: (id: string) => Promise<void>;
 }
 
-function WordRow({ word, onUpdate, onDelete }: WordRowProps) {
-  const [translation, setTranslation] = useState<string>(word.translation ?? "");
-  const [notes, setNotes] = useState<string>(word.notes ?? "");
-  const [status, setStatus] = useState<UnknownWord["status"]>(word.status);
-
-  useEffect(() => {
-    setTranslation(word.translation ?? "");
-  }, [word.translation, word.id]);
-
-  useEffect(() => {
-    setNotes(word.notes ?? "");
-  }, [word.notes, word.id]);
-
-  useEffect(() => {
-    setStatus(word.status);
-  }, [word.status, word.id]);
-
-  const commitTranslation = useCallback(() => {
-    const trimmed = translation.trim();
-    const normalized = trimmed === "" ? undefined : trimmed;
-    if ((normalized ?? "") === (word.translation ?? "")) return;
-    void onUpdate(word.id, { translation: normalized });
-  }, [onUpdate, translation, word.id, word.translation]);
-
-  const commitNotes = useCallback(() => {
-    const trimmed = notes.trim();
-    const normalized = trimmed === "" ? undefined : trimmed;
-    if ((normalized ?? "") === (word.notes ?? "")) return;
-    void onUpdate(word.id, { notes: normalized });
-  }, [notes, onUpdate, word.id, word.notes]);
-
-  const handleStatusChange = useCallback(
-    (event: ChangeEvent<HTMLSelectElement>) => {
-      const nextStatus = event.target.value as UnknownWord["status"];
-      setStatus(nextStatus);
-      if (nextStatus !== word.status) {
-        void onUpdate(word.id, { status: nextStatus });
-      }
-    },
-    [onUpdate, word.id, word.status],
-  );
-
+function WordRow({ word, frequencyRank, onDelete }: WordRowProps) {
   return (
     <tr className="hover:bg-white/5">
       <td className="px-4 py-2 font-medium">{word.original}</td>
       <td className="px-4 py-2 text-white/70">{word.normalized}</td>
       <td className="px-4 py-2 text-white/70">{word.stem}</td>
-      <td className="px-4 py-2">
-        <input
-          value={translation}
-          onChange={(event) => setTranslation(event.target.value)}
-          onBlur={commitTranslation}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              commitTranslation();
-              (event.currentTarget as HTMLInputElement).blur();
-            }
-          }}
-          className="w-full rounded-md bg-white/10 px-2 py-1 text-sm text-white focus:outline-none focus:ring-2 focus:ring-white/60"
-          placeholder="Add translation"
-        />
+      <td className="px-4 py-2 text-right text-white/70">
+        {typeof frequencyRank === "number" ? `#${frequencyRank.toLocaleString()}` : "—"}
       </td>
-      <td className="px-4 py-2">
-        <textarea
-          value={notes}
-          onChange={(event) => setNotes(event.target.value)}
-          onBlur={commitNotes}
-          rows={1}
-          className="w-full resize-y rounded-md bg-white/10 px-2 py-1 text-sm text-white focus:outline-none focus:ring-2 focus:ring-white/60"
-          placeholder="Add notes"
-        />
-      </td>
-      <td className="px-4 py-2 text-right">
-        <select
-          value={status}
-          onChange={handleStatusChange}
-          className="rounded-md bg-white/10 px-2 py-1 text-xs uppercase tracking-wide text-white focus:outline-none focus:ring-2 focus:ring-white/60"
-        >
-          <option value="learning">Learning</option>
-          <option value="known">Known</option>
-        </select>
-      </td>
+      <td className="px-4 py-2 text-right text-white/60">{new Date(word.updatedAt).toLocaleString()}</td>
       <td className="px-4 py-2 text-right">
         <button
           type="button"
@@ -262,11 +164,15 @@ export default function WordsPage() {
   const [importError, setImportError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
+  const [isLoadingRanks, setIsLoadingRanks] = useState(false);
+  const [rankError, setRankError] = useState<string | null>(null);
+  const [sortField, setSortField] = useState<SortField>("updatedAt");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [frequencyRanks, setFrequencyRanks] = useState<Map<string, number> | null>(null);
   const words = useDictionaryStore((state) => state.words);
   const initialized = useDictionaryStore((state) => state.initialized);
   const initialize = useDictionaryStore((state) => state.initialize);
-  const updateWord = useDictionaryStore((state) => state.updateWord);
   const removeWord = useDictionaryStore((state) => state.removeWord);
   const importWords = useDictionaryStore((state) => state.importWords);
 
@@ -276,10 +182,70 @@ export default function WordsPage() {
     }
   }, [initialized, initialize]);
 
-  const sorted = useMemo(
-    () => [...words].sort((a, b) => b.updatedAt - a.updatedAt),
-    [words],
-  );
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoadingRanks(true);
+    setRankError(null);
+
+    loadFrequencyRanks()
+      .then((ranks) => {
+        if (!cancelled) {
+          setFrequencyRanks(ranks);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setRankError(error instanceof Error ? error.message : "Unable to load frequency list.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoadingRanks(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const ranksById = useMemo(() => {
+    const map = new Map<string, number | null>();
+    for (const word of words) {
+      map.set(word.id, getFrequencyRankForWord(word, frequencyRanks));
+    }
+    return map;
+  }, [frequencyRanks, words]);
+
+  const sorted = useMemo(() => {
+    const order = [...words];
+    const direction = sortDirection === "asc" ? 1 : -1;
+
+    order.sort((a, b) => {
+      if (sortField === "alphabetical") {
+        return (
+          a.normalized.localeCompare(b.normalized, undefined, { sensitivity: "base" }) * direction
+        );
+      }
+
+      if (sortField === "frequencyRank") {
+        const aRank = ranksById.get(a.id);
+        const bRank = ranksById.get(b.id);
+
+        const aValue = typeof aRank === "number" ? aRank : Number.POSITIVE_INFINITY;
+        const bValue = typeof bRank === "number" ? bRank : Number.POSITIVE_INFINITY;
+
+        if (aValue !== bValue) {
+          return sortDirection === "asc" ? aValue - bValue : bValue - aValue;
+        }
+        return a.normalized.localeCompare(b.normalized, undefined, { sensitivity: "base" });
+      }
+
+      return (a.updatedAt - b.updatedAt) * direction;
+    });
+
+    return order;
+  }, [ranksById, sortDirection, sortField, words]);
 
   const handleExportJson = useCallback(() => {
     const blob = new Blob([JSON.stringify(sorted, null, 2)], {
@@ -289,44 +255,6 @@ export default function WordsPage() {
     const link = document.createElement("a");
     link.href = url;
     link.download = `unknown-words-${new Date().toISOString().split("T")[0]}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  }, [sorted]);
-
-  const handleExportCsv = useCallback(() => {
-    const headers = [
-      "original",
-      "normalized",
-      "stem",
-      "translation",
-      "notes",
-      "status",
-      "createdAt",
-      "updatedAt",
-      "id",
-    ];
-    const lines = sorted.map((word) =>
-      [
-        escapeCsv(word.original ?? ""),
-        escapeCsv(word.normalized),
-        escapeCsv(word.stem),
-        escapeCsv(word.translation ?? undefined),
-        escapeCsv(word.notes ?? undefined),
-        escapeCsv(word.status),
-        escapeCsv(word.createdAt),
-        escapeCsv(word.updatedAt),
-        escapeCsv(word.id),
-      ].join(","),
-    );
-    const blob = new Blob([headers.join(",") + "\n" + lines.join("\n")], {
-      type: "text/csv;charset=utf-8",
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `unknown-words-${new Date().toISOString().split("T")[0]}.csv`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -360,11 +288,32 @@ export default function WordsPage() {
         `Copied ${sorted.length} word${sorted.length === 1 ? "" : "s"} to the clipboard.`,
       );
     } catch (error) {
-      console.error(error);
       setImportSuccess(null);
-      setImportError("Failed to copy words to the clipboard.");
+      setImportError(error instanceof Error ? error.message : "Failed to copy words.");
     }
-  }, [setImportError, setImportSuccess, sorted]);
+  }, [sorted]);
+
+  const handleSortFieldChange = useCallback((next: SortField) => {
+    setSortField(next);
+    if (next === "updatedAt") {
+      setSortDirection("desc");
+    } else {
+      setSortDirection("asc");
+    }
+  }, []);
+
+  const handleSortHeaderClick = useCallback(
+    (field: SortField) => {
+      setSortDirection((prev) => {
+        if (sortField === field) {
+          return prev === "asc" ? "desc" : "asc";
+        }
+        return field === "updatedAt" ? "desc" : "asc";
+      });
+      setSortField(field);
+    },
+    [sortField],
+  );
 
   const handleImport = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
@@ -377,19 +326,13 @@ export default function WordsPage() {
 
       try {
         const text = await file.text();
-        const lowerName = file.name.toLowerCase();
-        const wordsToImport = lowerName.endsWith(".csv")
+        const incoming = file.name.endsWith(".csv")
           ? parseCsvWordList(text)
           : parseJsonWordList(text);
-
-        await importWords(wordsToImport);
-        setImportSuccess(
-          `Imported ${wordsToImport.length} word${wordsToImport.length === 1 ? "" : "s"}.`,
-        );
+        await importWords(incoming);
+        setImportSuccess(`Imported ${incoming.length} word${incoming.length === 1 ? "" : "s"}.`);
       } catch (error) {
-        setImportError(
-          error instanceof Error ? error.message : "Failed to import the provided file.",
-        );
+        setImportError(error instanceof Error ? error.message : "Failed to import words.");
       } finally {
         setIsImporting(false);
         event.target.value = "";
@@ -466,7 +409,7 @@ export default function WordsPage() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="text-xl font-semibold">Unknown Words</h2>
-          <p className="text-xs text-white/50">Edit translations, add notes, and track review status.</p>
+          <p className="text-xs text-white/50">Export your list or prune items you no longer need.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button
@@ -484,13 +427,6 @@ export default function WordsPage() {
             className="rounded bg-white/10 px-3 py-1 text-xs font-medium text-white hover:bg-white/20"
           >
             Copy Words
-          </button>
-          <button
-            type="button"
-            onClick={handleExportCsv}
-            className="rounded bg-white/10 px-3 py-1 text-xs font-medium text-white hover:bg-white/20"
-          >
-            Export CSV
           </button>
           <a
             href="https://chatgpt.com/share/69112ad9-3858-8013-a13d-061dd7661a56"
@@ -517,24 +453,95 @@ export default function WordsPage() {
           />
         </div>
       </div>
-      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-white/60">
-        <span>{sorted.length} items</span>
-        {importError ? (
-          <span className="text-red-400">{importError}</span>
-        ) : importSuccess ? (
-          <span className="text-emerald-400">{importSuccess}</span>
-        ) : null}
+      <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-white/60">
+        <div className="flex flex-wrap items-center gap-2">
+          <span>{sorted.length} items</span>
+          <label className="flex items-center gap-1">
+            <span>Sort</span>
+            <select
+              value={sortField}
+              onChange={(event) => {
+                handleSortFieldChange(event.target.value as SortField);
+              }}
+              className="rounded border border-white/10 bg-slate-900/80 px-2 py-1 text-white hover:bg-slate-800 focus:outline-none focus-visible:outline-none"
+            >
+              <option value="updatedAt" className="bg-slate-900 text-white">
+                Updated
+              </option>
+              <option value="alphabetical" className="bg-slate-900 text-white">
+                A-Z
+              </option>
+              <option value="frequencyRank" className="bg-slate-900 text-white">
+                Frequency Rank
+              </option>
+            </select>
+          </label>
+          <button
+            type="button"
+            className="rounded border border-white/10 bg-white/5 px-2 py-1 text-white"
+            onClick={() => setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"))}
+          >
+            {sortDirection === "asc" ? "Ascending" : "Descending"}
+          </button>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          {isLoadingRanks && <span>Loading frequency ranks…</span>}
+          {rankError && <span className="text-amber-300">{rankError}</span>}
+          {importError ? (
+            <span className="text-red-400">{importError}</span>
+          ) : importSuccess ? (
+            <span className="text-emerald-400">{importSuccess}</span>
+          ) : null}
+        </div>
       </div>
       <div className="overflow-hidden rounded-lg border border-white/10">
         <table className="min-w-full divide-y divide-white/10">
           <thead className="bg-white/5 text-left text-xs uppercase tracking-wide text-white/60">
             <tr>
-              <th className="px-4 py-2">Word</th>
+              <th className="px-4 py-2">
+                <button
+                  type="button"
+                  onClick={() => handleSortHeaderClick("alphabetical")}
+                  className="inline-flex items-center gap-1 hover:text-white"
+                >
+                  Word
+                  {sortField === "alphabetical" && (
+                    <span className="text-[10px] text-white/70">
+                      {sortDirection === "asc" ? "▲" : "▼"}
+                    </span>
+                  )}
+                </button>
+              </th>
               <th className="px-4 py-2">Normalized</th>
               <th className="px-4 py-2">Stem</th>
-              <th className="px-4 py-2">Translation</th>
-              <th className="px-4 py-2">Notes</th>
-              <th className="px-4 py-2 text-right">Status</th>
+              <th className="px-4 py-2 text-right">
+                <button
+                  type="button"
+                  onClick={() => handleSortHeaderClick("frequencyRank")}
+                  className="flex w-full items-center justify-end gap-1 hover:text-white"
+                >
+                  Frequency Rank
+                  {sortField === "frequencyRank" && (
+                    <span className="text-[10px] text-white/70">
+                      {sortDirection === "asc" ? "▲" : "▼"}
+                    </span>
+                  )}
+                </button>
+              </th>
+              <th className="px-4 py-2 text-right">
+                <button
+                  type="button"
+                  onClick={() => handleSortHeaderClick("updatedAt")}
+                  className="flex w-full items-center justify-end gap-1 hover:text-white"
+                >
+                  Updated
+                  {sortField === "updatedAt" && (
+                    <span className="text-[10px] text-white/70">
+                      {sortDirection === "asc" ? "▲" : "▼"}
+                    </span>
+                  )}
+                </button>
+              </th>
               <th className="px-4 py-2 text-right">Actions</th>
             </tr>
           </thead>
@@ -543,7 +550,7 @@ export default function WordsPage() {
               <WordRow
                 key={word.id}
                 word={word}
-                onUpdate={updateWord}
+                frequencyRank={ranksById.get(word.id) ?? null}
                 onDelete={removeWord}
               />
             ))}

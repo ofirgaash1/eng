@@ -5,11 +5,8 @@ export interface UnknownWord {
   original: string;
   normalized: string;
   stem: string;
-  translation?: string;
-  notes?: string;
   createdAt: number;
   updatedAt: number;
-  status: "learning" | "known";
 }
 
 export interface SubtitleFile {
@@ -56,6 +53,11 @@ export interface UserPrefs {
     exact: string;
     variant: string;
   };
+  mediaLibrary?: {
+    handle?: FileSystemDirectoryHandle;
+    label?: string;
+    lastPromptedAt?: number;
+  };
   lastOpened?: {
     videoName?: string;
     srtName?: string;
@@ -69,5 +71,10 @@ export interface RecentSessionRecord {
   subtitleName?: string;
   subtitleText?: string;
   subtitleHash?: string;
+  secondarySubtitleName?: string;
+  secondarySubtitleText?: string;
+  secondarySubtitleHash?: string;
+  secondarySubtitleEnabled?: boolean;
+  secondarySubtitleOffsetMs?: number;
   updatedAt: number;
 }

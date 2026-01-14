@@ -23,16 +23,36 @@ export class SubtitleLearnerDB extends Dexie {
   constructor() {
     super("subtitle-learner");
     this.version(1).stores({
-      words: "&id, normalized, stem, status, updatedAt",
+      words: "&id, normalized, stem, updatedAt",
       subtitleFiles: "&id, bytesHash, addedAt",
       prefs: "&id, updatedAt",
     });
     this.version(2).stores({
-      words: "&id, normalized, stem, status, updatedAt",
+      words: "&id, normalized, stem, updatedAt",
       subtitleFiles: "&id, bytesHash, addedAt",
       prefs: "&id, updatedAt",
       subtitleCues: "&id, fileHash, index",
       sessions: "&id, updatedAt",
+    });
+    this.version(3).stores({
+      words: "&id, normalized, stem, updatedAt",
+      subtitleFiles: "&id, bytesHash, addedAt",
+      prefs: "&id, updatedAt",
+      subtitleCues: "&id, fileHash, index",
+      sessions: "&id, updatedAt",
+    });
+    this.version(3).upgrade((tx) => {
+      return tx.table("words").toArray().then((records) => {
+        const sanitized = records.map((word) => ({
+          id: word.id,
+          original: word.original,
+          normalized: word.normalized,
+          stem: word.stem,
+          createdAt: word.createdAt,
+          updatedAt: word.updatedAt,
+        }));
+        return tx.table("words").clear().then(() => tx.table("words").bulkPut(sanitized));
+      });
     });
   }
 }

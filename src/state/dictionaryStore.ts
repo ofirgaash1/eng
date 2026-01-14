@@ -14,10 +14,7 @@ interface DictionaryState {
   initialized: boolean;
   initialize: () => Promise<void>;
   addUnknownWordFromToken: (token: Token | string) => Promise<void>;
-  updateWord: (
-    id: string,
-    updates: Partial<Omit<UnknownWord, "id" | "createdAt">>
-  ) => Promise<void>;
+  updateWord: (id: string, updates: Partial<Omit<UnknownWord, "id" | "createdAt">>) => Promise<void>;
   removeWord: (id: string) => Promise<void>;
   importWords: (words: ImportedUnknownWord[]) => Promise<void>;
   classForToken: (token: Token) => string;
@@ -28,22 +25,12 @@ export interface ImportedUnknownWord {
   original?: string;
   normalized?: string;
   stem?: string;
-  translation?: string | null;
-  notes?: string | null;
   createdAt?: number;
   updatedAt?: number;
-  status?: UnknownWord["status"];
 }
 
-const statusOrder: Record<UnknownWord["status"], number> = {
-  learning: 0,
-  known: 1,
-};
-
 function sortWords(words: UnknownWord[]): UnknownWord[] {
-  return [...words].sort(
-    (a, b) => statusOrder[a.status] - statusOrder[b.status] || b.updatedAt - a.updatedAt
-  );
+  return [...words].sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
 function normalizeToken(token: Token | string) {
@@ -76,7 +63,6 @@ export const useDictionaryStore = create<DictionaryState>((set, get) => ({
         ...existing,
         updatedAt: now,
         original: existing.original || token.text,
-        status: "learning",
       };
       set((state) => ({
         words: sortWords(state.words.map((word) => (word.id === existing.id ? updated : word))),
@@ -92,7 +78,6 @@ export const useDictionaryStore = create<DictionaryState>((set, get) => ({
       stem: token.stem,
       createdAt: now,
       updatedAt: now,
-      status: "learning",
     };
 
     set((state) => ({ words: sortWords([...state.words, next]) }));
@@ -132,17 +117,12 @@ export const useDictionaryStore = create<DictionaryState>((set, get) => ({
       if (!candidate.normalized || !candidate.stem) continue;
       const key = `${candidate.normalized}::${candidate.stem}`;
       const previous = map.get(key);
-      const translation = candidate.translation ?? previous?.translation;
-      const notes = candidate.notes ?? previous?.notes;
 
       map.set(key, {
         id: candidate.id ?? previous?.id ?? nanoid(),
         original: candidate.original ?? previous?.original ?? candidate.normalized,
         normalized: candidate.normalized,
         stem: candidate.stem,
-        translation: translation ? translation.trim() || undefined : undefined,
-        notes: notes ? notes.trim() || undefined : undefined,
-        status: candidate.status ?? previous?.status ?? "learning",
         createdAt: candidate.createdAt ?? previous?.createdAt ?? now,
         updatedAt: candidate.updatedAt ?? now,
       });
@@ -153,13 +133,8 @@ export const useDictionaryStore = create<DictionaryState>((set, get) => ({
     await replaceAllWords(next);
   },
   classForToken: (token) => {
-    const exact = new Set<string>();
-    const variants = new Set<string>();
-    for (const word of get().words) {
-      if (word.status !== "learning") continue;
-      exact.add(word.normalized);
-      variants.add(word.stem);
-    }
+    const exact = new Set(get().words.map((word) => word.normalized));
+    const variants = new Set(get().words.map((word) => word.stem));
     if (exact.has(token.normalized)) {
       return "hl-exact text-white";
     }
