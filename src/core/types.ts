@@ -71,5 +71,10 @@ export interface RecentSessionRecord {
   subtitleName?: string;
   subtitleText?: string;
   subtitleHash?: string;
+  secondarySubtitleName?: string;
+  secondarySubtitleText?: string;
+  secondarySubtitleHash?: string;
+  secondarySubtitleEnabled?: boolean;
+  secondarySubtitleOffsetMs?: number;
   updatedAt: number;
 }

@@ -90,7 +90,10 @@ export default function PlayerPage() {
   const playerContainerRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const workerRef = useRef<Worker | null>(null);
-  const pendingParseRef = useRef<{ id: string; hash: string; fileName: string } | null>(null);
+  const pendingParseRef = useRef<
+    Map<string, { hash: string; fileName: string; target: "primary" | "secondary" }>
+  >(new Map());
+  const latestParseRef = useRef<{ primary?: string; secondary?: string }>({});
   const [videoName, setVideoName] = useState<string>("");
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [subtitleName, setSubtitleName] = useState<string>("");
@@ -99,6 +102,12 @@ export default function PlayerPage() {
   const [subtitleLoading, setSubtitleLoading] = useState<boolean>(false);
   const [subtitleOffsetMs, setSubtitleOffsetMs] = useState<number>(0);
   const [subtitleError, setSubtitleError] = useState<string | null>(null);
+  const [secondarySubtitleName, setSecondarySubtitleName] = useState<string>("");
+  const [secondaryCues, setSecondaryCues] = useState<Cue[]>([]);
+  const [secondarySubtitleLoading, setSecondarySubtitleLoading] = useState<boolean>(false);
+  const [secondarySubtitleOffsetMs, setSecondarySubtitleOffsetMs] = useState<number>(0);
+  const [secondarySubtitleError, setSecondarySubtitleError] = useState<string | null>(null);
+  const [secondarySubtitleEnabled, setSecondarySubtitleEnabled] = useState<boolean>(false);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const addWord = useDictionaryStore((state) => state.addUnknownWordFromToken);
   const classForToken = useDictionaryStore((state) => state.classForToken);
@@ -130,6 +139,17 @@ export default function PlayerPage() {
       upsertSubtitleFile({ name: fileName, bytesHash: hash, totalCues: parsed.length }),
     ]);
   }, []);
+
+  const applyParsedSecondaryCues = useCallback(
+    async (hash: string, fileName: string, parsed: Cue[]) => {
+      setSecondaryCues(parsed);
+      await Promise.all([
+        saveCuesForFile(hash, parsed),
+        upsertSubtitleFile({ name: fileName, bytesHash: hash, totalCues: parsed.length }),
+      ]);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!dictionaryReady) {
@@ -199,24 +219,46 @@ export default function PlayerPage() {
     if (!worker) return;
 
     const handleMessage = async (event: MessageEvent<WorkerResponse>) => {
-      const pending = pendingParseRef.current;
-      if (!pending || event.data.id !== pending.id) return;
-      pendingParseRef.current = null;
+      const pending = pendingParseRef.current.get(event.data.id);
+      if (!pending) return;
+      if (latestParseRef.current[pending.target] !== event.data.id) {
+        pendingParseRef.current.delete(event.data.id);
+        return;
+      }
+      pendingParseRef.current.delete(event.data.id);
 
       if (event.data.error) {
-        setSubtitleError(event.data.error);
-        setSubtitleLoading(false);
+        if (pending.target === "secondary") {
+          setSecondarySubtitleError(event.data.error);
+          setSecondarySubtitleLoading(false);
+        } else {
+          setSubtitleError(event.data.error);
+          setSubtitleLoading(false);
+        }
         return;
       }
 
       try {
-        setSubtitleError(null);
-        await applyParsedCues(pending.hash, pending.fileName, event.data.cues);
+        if (pending.target === "secondary") {
+          setSecondarySubtitleError(null);
+          await applyParsedSecondaryCues(pending.hash, pending.fileName, event.data.cues);
+        } else {
+          setSubtitleError(null);
+          await applyParsedCues(pending.hash, pending.fileName, event.data.cues);
+        }
       } catch (error) {
         console.error(error);
-        setSubtitleError("Failed to store parsed subtitles.");
+        if (pending.target === "secondary") {
+          setSecondarySubtitleError("Failed to store parsed secondary subtitles.");
+        } else {
+          setSubtitleError("Failed to store parsed subtitles.");
+        }
       } finally {
-        setSubtitleLoading(false);
+        if (pending.target === "secondary") {
+          setSecondarySubtitleLoading(false);
+        } else {
+          setSubtitleLoading(false);
+        }
       }
     };
 
@@ -224,7 +266,7 @@ export default function PlayerPage() {
     return () => {
       worker.removeEventListener("message", handleMessage);
     };
-  }, [applyParsedCues]);
+  }, [applyParsedCues, applyParsedSecondaryCues]);
 
   useEffect(() => {
     let cancelled = false;
@@ -251,63 +293,135 @@ export default function PlayerPage() {
       if (session.subtitleName) {
         setSubtitleName(session.subtitleName);
       }
+      if (session.secondarySubtitleName) {
+        setSecondarySubtitleName(session.secondarySubtitleName);
+      }
+      if (typeof session.secondarySubtitleEnabled === "boolean") {
+        setSecondarySubtitleEnabled(session.secondarySubtitleEnabled);
+      } else if (session.secondarySubtitleHash) {
+        setSecondarySubtitleEnabled(true);
+      }
+      if (typeof session.secondarySubtitleOffsetMs === "number") {
+        setSecondarySubtitleOffsetMs(session.secondarySubtitleOffsetMs);
+      }
       if (!session.subtitleHash) {
-        return;
-      }
-
-      setSubtitleLoading(true);
-      setSubtitleError(null);
-      const cached = await getCuesForFile(session.subtitleHash);
-      if (cancelled) {
-        return;
-      }
-
-      if (cached) {
-        setCues(cached);
-        setSubtitleLoading(false);
-        await upsertSubtitleFile({
-          name: session.subtitleName ?? session.subtitleHash,
-          bytesHash: session.subtitleHash,
-          totalCues: cached.length,
-        });
-        return;
-      }
-
-      if (!session.subtitleText) {
-        setSubtitleLoading(false);
-        return;
-      }
-
-      const worker = workerRef.current;
-      if (worker) {
-        const requestId = crypto.randomUUID();
-        pendingParseRef.current = {
-          id: requestId,
-          hash: session.subtitleHash,
-          fileName: session.subtitleName ?? session.subtitleHash,
-        };
-        worker.postMessage({ id: requestId, text: session.subtitleText });
-        return;
-      }
-
-      try {
-        const parsed = parseSrt(session.subtitleText).map((cue) => ({
-          ...cue,
-          tokens: cue.tokens ?? tokenize(cue.rawText),
-        }));
-        await applyParsedCues(
-          session.subtitleHash,
-          session.subtitleName ?? session.subtitleHash,
-          parsed,
-        );
-      } catch (error) {
-        if (!cancelled) {
-          setSubtitleError(error instanceof Error ? error.message : "Failed to parse subtitles");
-          setCues([]);
+        if (!session.secondarySubtitleHash) {
+          return;
         }
-      } finally {
-        if (!cancelled) {
+      }
+
+      if (session.secondarySubtitleHash) {
+        setSecondarySubtitleLoading(true);
+        setSecondarySubtitleError(null);
+        const cachedSecondary = await getCuesForFile(session.secondarySubtitleHash);
+        if (cancelled) {
+          return;
+        }
+
+        if (cachedSecondary) {
+          setSecondaryCues(cachedSecondary);
+          setSecondarySubtitleLoading(false);
+          await upsertSubtitleFile({
+            name: session.secondarySubtitleName ?? session.secondarySubtitleHash,
+            bytesHash: session.secondarySubtitleHash,
+            totalCues: cachedSecondary.length,
+          });
+        } else if (session.secondarySubtitleText) {
+          const worker = workerRef.current;
+          if (worker) {
+            const requestId = crypto.randomUUID();
+            pendingParseRef.current.set(requestId, {
+              hash: session.secondarySubtitleHash,
+              fileName: session.secondarySubtitleName ?? session.secondarySubtitleHash,
+              target: "secondary",
+            });
+            latestParseRef.current.secondary = requestId;
+            worker.postMessage({ id: requestId, text: session.secondarySubtitleText });
+          } else {
+            try {
+              const parsed = parseSrt(session.secondarySubtitleText).map((cue) => ({
+                ...cue,
+                tokens: cue.tokens ?? tokenize(cue.rawText),
+              }));
+              await applyParsedSecondaryCues(
+                session.secondarySubtitleHash,
+                session.secondarySubtitleName ?? session.secondarySubtitleHash,
+                parsed,
+              );
+            } catch (error) {
+              if (!cancelled) {
+                setSecondarySubtitleError(
+                  error instanceof Error ? error.message : "Failed to parse secondary subtitles",
+                );
+                setSecondaryCues([]);
+              }
+            } finally {
+              if (!cancelled) {
+                setSecondarySubtitleLoading(false);
+              }
+            }
+          }
+        } else {
+          setSecondarySubtitleLoading(false);
+        }
+      }
+
+      if (session.subtitleHash) {
+        setSubtitleLoading(true);
+        setSubtitleError(null);
+        const cached = await getCuesForFile(session.subtitleHash);
+        if (cancelled) {
+          return;
+        }
+
+        if (cached) {
+          setCues(cached);
           setSubtitleLoading(false);
+          await upsertSubtitleFile({
+            name: session.subtitleName ?? session.subtitleHash,
+            bytesHash: session.subtitleHash,
+            totalCues: cached.length,
+          });
+          return;
+        }
+
+        if (!session.subtitleText) {
+          setSubtitleLoading(false);
+          return;
+        }
+
+        const worker = workerRef.current;
+        if (worker) {
+          const requestId = crypto.randomUUID();
+          pendingParseRef.current.set(requestId, {
+            hash: session.subtitleHash,
+            fileName: session.subtitleName ?? session.subtitleHash,
+            target: "primary",
+          });
+          latestParseRef.current.primary = requestId;
+          worker.postMessage({ id: requestId, text: session.subtitleText });
+          return;
+        }
+
+        try {
+          const parsed = parseSrt(session.subtitleText).map((cue) => ({
+            ...cue,
+            tokens: cue.tokens ?? tokenize(cue.rawText),
+          }));
+          await applyParsedCues(
+            session.subtitleHash,
+            session.subtitleName ?? session.subtitleHash,
+            parsed,
+          );
+        } catch (error) {
+          if (!cancelled) {
+            setSubtitleError(error instanceof Error ? error.message : "Failed to parse subtitles");
+            setCues([]);
+          }
+        } finally {
+          if (!cancelled) {
+            setSubtitleLoading(false);
+          }
         }
       }
     };
@@ -317,7 +431,7 @@ export default function PlayerPage() {
     return () => {
       cancelled = true;
     };
-  }, [applyParsedCues]);
+  }, [applyParsedCues, applyParsedSecondaryCues]);
   useEffect(() => {
     if (!videoUrl) return;
     return () => {
@@ -382,7 +496,6 @@ export default function PlayerPage() {
       const text = await file.text();
       const hash = await hashBlob(file);
 
-      pendingParseRef.current = null;
       setSubtitleName(file.name);
       setCues([]);
 
@@ -403,7 +516,8 @@ export default function PlayerPage() {
       const worker = workerRef.current;
       if (worker) {
         const requestId = crypto.randomUUID();
-        pendingParseRef.current = { id: requestId, hash, fileName: file.name };
+        pendingParseRef.current.set(requestId, { hash, fileName: file.name, target: "primary" });
+        latestParseRef.current.primary = requestId;
         worker.postMessage({ id: requestId, text });
         return;
       }
@@ -422,6 +536,64 @@ export default function PlayerPage() {
       }
     },
     [applyParsedCues, resetPlayback],
+  );
+
+  const processSecondarySubtitleFile = useCallback(
+    async (file: File) => {
+      setSecondarySubtitleError(null);
+      setSecondarySubtitleLoading(true);
+      const text = await file.text();
+      const hash = await hashBlob(file);
+
+      setSecondarySubtitleName(file.name);
+      setSecondaryCues([]);
+
+      void saveLastSession({
+        secondarySubtitleName: file.name,
+        secondarySubtitleText: text,
+        secondarySubtitleHash: hash,
+        secondarySubtitleEnabled: true,
+      });
+
+      const cached = await getCuesForFile(hash);
+      if (cached) {
+        setSecondaryCues(cached);
+        setSecondarySubtitleLoading(false);
+        setSecondarySubtitleEnabled(true);
+        await upsertSubtitleFile({ name: file.name, bytesHash: hash, totalCues: cached.length });
+        return;
+      }
+
+      const worker = workerRef.current;
+      if (worker) {
+        const requestId = crypto.randomUUID();
+        pendingParseRef.current.set(requestId, {
+          hash,
+          fileName: file.name,
+          target: "secondary",
+        });
+        latestParseRef.current.secondary = requestId;
+        worker.postMessage({ id: requestId, text });
+        return;
+      }
+
+      try {
+        const parsed = parseSrt(text).map((cue) => ({
+          ...cue,
+          tokens: cue.tokens ?? tokenize(cue.rawText),
+        }));
+        await applyParsedSecondaryCues(hash, file.name, parsed);
+        setSecondarySubtitleEnabled(true);
+      } catch (error) {
+        setSecondarySubtitleError(
+          error instanceof Error ? error.message : "Failed to parse secondary subtitles",
+        );
+        setSecondaryCues([]);
+      } finally {
+        setSecondarySubtitleLoading(false);
+      }
+    },
+    [applyParsedSecondaryCues],
   );
 
   const handleVideoUpload = useCallback(
@@ -477,11 +649,64 @@ export default function PlayerPage() {
     [processSubtitleFile],
   );
 
+  const handleSecondarySubtitleUpload = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+
+      await processSecondarySubtitleFile(file);
+
+      event.target.value = "";
+    },
+    [processSecondarySubtitleFile],
+  );
+
   const handleTimeUpdate = () => {
     const video = videoRef.current;
-    if (!video || cues.length === 0) return;
+    if (!video || (cues.length === 0 && secondaryCues.length === 0)) return;
     setCurrentTimeMs(video.currentTime * 1000);
   };
+
+  const activeCues = useMemo(
+    () =>
+      cues.filter((cue) => {
+        const adjustedStart = cue.startMs + subtitleOffsetMs;
+        const adjustedEnd = cue.endMs + subtitleOffsetMs;
+        return adjustedStart <= currentTimeMs && adjustedEnd >= currentTimeMs;
+      }),
+    [cues, currentTimeMs, subtitleOffsetMs],
+  );
+
+  const activeSecondaryCues = useMemo(
+    () =>
+      secondaryCues.filter((cue) => {
+        const adjustedStart = cue.startMs + secondarySubtitleOffsetMs;
+        const adjustedEnd = cue.endMs + secondarySubtitleOffsetMs;
+        return adjustedStart <= currentTimeMs && adjustedEnd >= currentTimeMs;
+      }),
+    [secondaryCues, currentTimeMs, secondarySubtitleOffsetMs],
+  );
+
+  const adjustSubtitleOffset = useCallback((deltaMs: number) => {
+    setSubtitleOffsetMs((previous) => previous + deltaMs);
+  }, []);
+
+  const adjustSecondarySubtitleOffset = useCallback((deltaMs: number) => {
+    setSecondarySubtitleOffsetMs((previous) => {
+      const next = previous + deltaMs;
+      void saveLastSession({ secondarySubtitleOffsetMs: next });
+      return next;
+    });
+  }, []);
+
+  const toggleSecondarySubtitle = useCallback(() => {
+    if (secondaryCues.length === 0) return;
+    setSecondarySubtitleEnabled((previous) => {
+      const next = !previous;
+      void saveLastSession({ secondarySubtitleEnabled: next });
+      return next;
+    });
+  }, [secondaryCues.length]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -533,6 +758,13 @@ export default function PlayerPage() {
           toggleFullscreen();
           break;
         }
+        case "h":
+        case "H":
+        case "י": {
+          event.preventDefault();
+          toggleSecondarySubtitle();
+          break;
+        }
         default:
           break;
       }
@@ -542,21 +774,7 @@ export default function PlayerPage() {
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [seekBy, toggleFullscreen, togglePlayback]);
-
-  const activeCues = useMemo(
-    () =>
-      cues.filter((cue) => {
-        const adjustedStart = cue.startMs + subtitleOffsetMs;
-        const adjustedEnd = cue.endMs + subtitleOffsetMs;
-        return adjustedStart <= currentTimeMs && adjustedEnd >= currentTimeMs;
-      }),
-    [cues, currentTimeMs, subtitleOffsetMs],
-  );
-
-  const adjustSubtitleOffset = useCallback((deltaMs: number) => {
-    setSubtitleOffsetMs((previous) => previous + deltaMs);
-  }, []);
+  }, [seekBy, toggleFullscreen, togglePlayback, toggleSecondarySubtitle]);
 
   return (
     <div className="grid gap-6 lg:grid-cols-[2fr,1fr]">
@@ -590,6 +808,26 @@ export default function PlayerPage() {
           >
             <track kind="subtitles" srcLang="en" label={subtitleName || "Subtitles"} />
           </video>
+          {secondarySubtitleEnabled && activeSecondaryCues.length > 0 && (
+            <div className="pointer-events-none absolute inset-0 flex flex-col justify-start p-6">
+              <div className="pointer-events-auto flex flex-col items-center gap-3">
+                {activeSecondaryCues.map((cue) => (
+                  <div
+                    key={`${cue.startMs}-${cue.endMs}`}
+                    className="subtitle-overlay max-w-3xl text-center"
+                  >
+                    <SubtitleCue
+                      cue={cue}
+                      classForToken={classForToken}
+                      onTokenClick={handleTokenClick}
+                      onTokenContextMenu={handleTokenContextMenu}
+                      className="justify-center text-center"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {activeCues.length > 0 && (
             <div className="pointer-events-none absolute inset-0 flex flex-col justify-end p-6">
               <div className="pointer-events-auto flex flex-col items-center gap-3">
@@ -667,6 +905,82 @@ export default function PlayerPage() {
             <span className="text-xs text-red-400">{subtitleError}</span>
           )}
         </label>
+        <details className="rounded-lg border border-white/10 bg-white/5 p-4 text-sm">
+          <summary className="cursor-pointer list-none font-medium text-white/90">
+            Second subtitles (optional)
+          </summary>
+          <div className="mt-3 space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                className="rounded bg-white/10 px-2 py-1 text-xs font-medium text-white transition hover:bg-white/20 focus:outline-none focus-visible:outline-none"
+                onClick={(event) => {
+                  toggleSecondarySubtitle();
+                  if (event.currentTarget instanceof HTMLElement) {
+                    event.currentTarget.blur();
+                  }
+                }}
+                disabled={secondaryCues.length === 0}
+              >
+                {secondarySubtitleEnabled ? "On" : "Off"}
+              </button>
+              <span className="text-xs text-white/60">
+                Shows a second line at the top. Shortcut: H/י
+              </span>
+            </div>
+            <label className="flex w-full cursor-pointer flex-col gap-2 rounded-lg border border-dashed border-white/20 bg-white/5 p-3 text-xs hover:border-white/40">
+              <span className="font-medium text-sm">Load second subtitles (SRT)</span>
+              <input
+                type="file"
+                accept=".srt"
+                className="hidden"
+                onChange={handleSecondarySubtitleUpload}
+              />
+              <span className="text-xs text-white/60">
+                Current: {secondarySubtitleName || "None"}
+              </span>
+              {secondarySubtitleLoading && (
+                <span className="text-xs text-amber-300">Processing second subtitles…</span>
+              )}
+              {secondarySubtitleError && (
+                <span className="text-xs text-red-400">{secondarySubtitleError}</span>
+              )}
+            </label>
+            <div className="flex flex-wrap items-center gap-3 rounded-lg bg-white/5 p-2 text-xs text-white/80">
+              <span className="font-medium text-white">Second subtitle timing</span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:outline-none"
+                  onClick={(event) => {
+                    adjustSecondarySubtitleOffset(-500);
+                    if (event.currentTarget instanceof HTMLElement) {
+                      event.currentTarget.blur();
+                    }
+                  }}
+                >
+                  –0.5s
+                </button>
+                <button
+                  type="button"
+                  className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:outline-none"
+                  onClick={(event) => {
+                    adjustSecondarySubtitleOffset(500);
+                    if (event.currentTarget instanceof HTMLElement) {
+                      event.currentTarget.blur();
+                    }
+                  }}
+                >
+                  +0.5s
+                </button>
+              </div>
+              <span className="text-xs text-white/60">
+                Offset: {secondarySubtitleOffsetMs >= 0 ? "+" : ""}
+                {(secondarySubtitleOffsetMs / 1000).toFixed(1)}s
+              </span>
+            </div>
+          </div>
+        </details>
       </section>
       <aside className="space-y-4">
         <div className="rounded-lg bg-black/40 p-4">
