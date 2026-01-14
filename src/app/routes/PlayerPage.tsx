@@ -35,6 +35,7 @@ function openDefinitionSearch(word: string) {
 interface SubtitleCueProps {
   cue: Cue;
   onTokenClick: (token: Token) => void;
+  onTokenContextMenu: (token: Token) => void;
   classForToken: (token: Token) => string;
   className?: string;
 }
@@ -45,7 +46,13 @@ type WorkerResponse = {
   error?: string;
 };
 
-function SubtitleCue({ cue, onTokenClick, classForToken, className }: SubtitleCueProps) {
+function SubtitleCue({
+  cue,
+  onTokenClick,
+  onTokenContextMenu,
+  classForToken,
+  className,
+}: SubtitleCueProps) {
   const tokens = useMemo(() => cue.tokens ?? tokenize(cue.rawText), [cue]);
   return (
     <div className={`flex flex-wrap gap-1 ${className ?? ""}`}>
@@ -62,6 +69,11 @@ function SubtitleCue({ cue, onTokenClick, classForToken, className }: SubtitleCu
             if (event.currentTarget instanceof HTMLElement) {
               event.currentTarget.blur();
             }
+          }}
+          onContextMenu={(event) => {
+            if (!token.isWord) return;
+            event.preventDefault();
+            onTokenContextMenu(token);
           }}
           disabled={!token.isWord}
         >
@@ -97,6 +109,13 @@ export default function PlayerPage() {
   const setLastOpened = usePrefsStore((state) => state.setLastOpened);
 
   const handleTokenClick = useCallback(
+    (token: Token) => {
+      void addWord(token);
+    },
+    [addWord],
+  );
+
+  const handleTokenContextMenu = useCallback(
     (token: Token) => {
       openDefinitionSearch(token.text);
       void addWord(token);
@@ -583,6 +602,7 @@ export default function PlayerPage() {
                       cue={cue}
                       classForToken={classForToken}
                       onTokenClick={handleTokenClick}
+                      onTokenContextMenu={handleTokenContextMenu}
                       className="justify-center text-center"
                     />
                   </div>
@@ -666,6 +686,7 @@ export default function PlayerPage() {
                     cue={cue}
                     classForToken={classForToken}
                     onTokenClick={handleTokenClick}
+                    onTokenContextMenu={handleTokenContextMenu}
                   />
                 </div>
               ))}
