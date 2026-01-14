@@ -667,6 +667,47 @@ export default function PlayerPage() {
     setCurrentTimeMs(video.currentTime * 1000);
   };
 
+  const activeCues = useMemo(
+    () =>
+      cues.filter((cue) => {
+        const adjustedStart = cue.startMs + subtitleOffsetMs;
+        const adjustedEnd = cue.endMs + subtitleOffsetMs;
+        return adjustedStart <= currentTimeMs && adjustedEnd >= currentTimeMs;
+      }),
+    [cues, currentTimeMs, subtitleOffsetMs],
+  );
+
+  const activeSecondaryCues = useMemo(
+    () =>
+      secondaryCues.filter((cue) => {
+        const adjustedStart = cue.startMs + secondarySubtitleOffsetMs;
+        const adjustedEnd = cue.endMs + secondarySubtitleOffsetMs;
+        return adjustedStart <= currentTimeMs && adjustedEnd >= currentTimeMs;
+      }),
+    [secondaryCues, currentTimeMs, secondarySubtitleOffsetMs],
+  );
+
+  const adjustSubtitleOffset = useCallback((deltaMs: number) => {
+    setSubtitleOffsetMs((previous) => previous + deltaMs);
+  }, []);
+
+  const adjustSecondarySubtitleOffset = useCallback((deltaMs: number) => {
+    setSecondarySubtitleOffsetMs((previous) => {
+      const next = previous + deltaMs;
+      void saveLastSession({ secondarySubtitleOffsetMs: next });
+      return next;
+    });
+  }, []);
+
+  const toggleSecondarySubtitle = useCallback(() => {
+    if (secondaryCues.length === 0) return;
+    setSecondarySubtitleEnabled((previous) => {
+      const next = !previous;
+      void saveLastSession({ secondarySubtitleEnabled: next });
+      return next;
+    });
+  }, [secondaryCues.length]);
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const video = videoRef.current;
@@ -734,47 +775,6 @@ export default function PlayerPage() {
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [seekBy, toggleFullscreen, togglePlayback, toggleSecondarySubtitle]);
-
-  const activeCues = useMemo(
-    () =>
-      cues.filter((cue) => {
-        const adjustedStart = cue.startMs + subtitleOffsetMs;
-        const adjustedEnd = cue.endMs + subtitleOffsetMs;
-        return adjustedStart <= currentTimeMs && adjustedEnd >= currentTimeMs;
-      }),
-    [cues, currentTimeMs, subtitleOffsetMs],
-  );
-
-  const activeSecondaryCues = useMemo(
-    () =>
-      secondaryCues.filter((cue) => {
-        const adjustedStart = cue.startMs + secondarySubtitleOffsetMs;
-        const adjustedEnd = cue.endMs + secondarySubtitleOffsetMs;
-        return adjustedStart <= currentTimeMs && adjustedEnd >= currentTimeMs;
-      }),
-    [secondaryCues, currentTimeMs, secondarySubtitleOffsetMs],
-  );
-
-  const adjustSubtitleOffset = useCallback((deltaMs: number) => {
-    setSubtitleOffsetMs((previous) => previous + deltaMs);
-  }, []);
-
-  const adjustSecondarySubtitleOffset = useCallback((deltaMs: number) => {
-    setSecondarySubtitleOffsetMs((previous) => {
-      const next = previous + deltaMs;
-      void saveLastSession({ secondarySubtitleOffsetMs: next });
-      return next;
-    });
-  }, []);
-
-  const toggleSecondarySubtitle = useCallback(() => {
-    if (secondaryCues.length === 0) return;
-    setSecondarySubtitleEnabled((previous) => {
-      const next = !previous;
-      void saveLastSession({ secondarySubtitleEnabled: next });
-      return next;
-    });
-  }, [secondaryCues.length]);
 
   return (
     <div className="grid gap-6 lg:grid-cols-[2fr,1fr]">
