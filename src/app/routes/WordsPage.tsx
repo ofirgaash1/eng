@@ -302,16 +302,18 @@ export default function WordsPage() {
     }
   }, []);
 
-  const handleSortHeaderClick = useCallback((field: SortField) => {
-    setSortField((current) => {
-      if (current === field) {
-        setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
-        return current;
-      }
-      setSortDirection(field === "updatedAt" ? "desc" : "asc");
-      return field;
-    });
-  }, []);
+  const handleSortHeaderClick = useCallback(
+    (field: SortField) => {
+      setSortDirection((prev) => {
+        if (sortField === field) {
+          return prev === "asc" ? "desc" : "asc";
+        }
+        return field === "updatedAt" ? "desc" : "asc";
+      });
+      setSortField(field);
+    },
+    [sortField],
+  );
 
   const handleImport = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
