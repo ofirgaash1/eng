@@ -19,6 +19,11 @@ export async function saveLastSession(
     subtitleName: current?.subtitleName,
     subtitleText: current?.subtitleText,
     subtitleHash: current?.subtitleHash,
+    secondarySubtitleName: current?.secondarySubtitleName,
+    secondarySubtitleText: current?.secondarySubtitleText,
+    secondarySubtitleHash: current?.secondarySubtitleHash,
+    secondarySubtitleEnabled: current?.secondarySubtitleEnabled,
+    secondarySubtitleOffsetMs: current?.secondarySubtitleOffsetMs,
   };
 
   if (Object.prototype.hasOwnProperty.call(updates, "videoName")) {
@@ -35,6 +40,21 @@ export async function saveLastSession(
   }
   if (Object.prototype.hasOwnProperty.call(updates, "subtitleHash")) {
     next.subtitleHash = updates.subtitleHash;
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, "secondarySubtitleName")) {
+    next.secondarySubtitleName = updates.secondarySubtitleName;
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, "secondarySubtitleText")) {
+    next.secondarySubtitleText = updates.secondarySubtitleText;
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, "secondarySubtitleHash")) {
+    next.secondarySubtitleHash = updates.secondarySubtitleHash;
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, "secondarySubtitleEnabled")) {
+    next.secondarySubtitleEnabled = updates.secondarySubtitleEnabled;
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, "secondarySubtitleOffsetMs")) {
+    next.secondarySubtitleOffsetMs = updates.secondarySubtitleOffsetMs;
   }
 
   await db.sessions.put(next);
