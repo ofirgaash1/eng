@@ -302,6 +302,17 @@ export default function WordsPage() {
     }
   }, []);
 
+  const handleSortHeaderClick = useCallback((field: SortField) => {
+    setSortField((current) => {
+      if (current === field) {
+        setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
+        return current;
+      }
+      setSortDirection(field === "updatedAt" ? "desc" : "asc");
+      return field;
+    });
+  }, []);
+
   const handleImport = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0];
@@ -450,11 +461,17 @@ export default function WordsPage() {
               onChange={(event) => {
                 handleSortFieldChange(event.target.value as SortField);
               }}
-              className="rounded border border-white/10 bg-white/5 px-2 py-1 text-white"
+              className="rounded border border-white/10 bg-slate-900/80 px-2 py-1 text-white hover:bg-slate-800 focus:outline-none focus-visible:outline-none"
             >
-              <option value="updatedAt">Updated</option>
-              <option value="alphabetical">A-Z</option>
-              <option value="frequencyRank">Frequency Rank</option>
+              <option value="updatedAt" className="bg-slate-900 text-white">
+                Updated
+              </option>
+              <option value="alphabetical" className="bg-slate-900 text-white">
+                A-Z
+              </option>
+              <option value="frequencyRank" className="bg-slate-900 text-white">
+                Frequency Rank
+              </option>
             </select>
           </label>
           <button
@@ -479,11 +496,50 @@ export default function WordsPage() {
         <table className="min-w-full divide-y divide-white/10">
           <thead className="bg-white/5 text-left text-xs uppercase tracking-wide text-white/60">
             <tr>
-              <th className="px-4 py-2">Word</th>
+              <th className="px-4 py-2">
+                <button
+                  type="button"
+                  onClick={() => handleSortHeaderClick("alphabetical")}
+                  className="inline-flex items-center gap-1 hover:text-white"
+                >
+                  Word
+                  {sortField === "alphabetical" && (
+                    <span className="text-[10px] text-white/70">
+                      {sortDirection === "asc" ? "▲" : "▼"}
+                    </span>
+                  )}
+                </button>
+              </th>
               <th className="px-4 py-2">Normalized</th>
               <th className="px-4 py-2">Stem</th>
-              <th className="px-4 py-2 text-right">Frequency Rank</th>
-              <th className="px-4 py-2 text-right">Updated</th>
+              <th className="px-4 py-2 text-right">
+                <button
+                  type="button"
+                  onClick={() => handleSortHeaderClick("frequencyRank")}
+                  className="flex w-full items-center justify-end gap-1 hover:text-white"
+                >
+                  Frequency Rank
+                  {sortField === "frequencyRank" && (
+                    <span className="text-[10px] text-white/70">
+                      {sortDirection === "asc" ? "▲" : "▼"}
+                    </span>
+                  )}
+                </button>
+              </th>
+              <th className="px-4 py-2 text-right">
+                <button
+                  type="button"
+                  onClick={() => handleSortHeaderClick("updatedAt")}
+                  className="flex w-full items-center justify-end gap-1 hover:text-white"
+                >
+                  Updated
+                  {sortField === "updatedAt" && (
+                    <span className="text-[10px] text-white/70">
+                      {sortDirection === "asc" ? "▲" : "▼"}
+                    </span>
+                  )}
+                </button>
+              </th>
               <th className="px-4 py-2 text-right">Actions</th>
             </tr>
           </thead>
