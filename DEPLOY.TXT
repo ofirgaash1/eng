@@ -1,0 +1,7 @@
+npm install
+npm run build
+git add .
+git commit -m "ok"
+git push
+git subtree push --prefix dist origin gh-pages
+
