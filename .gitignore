@@ -8,3 +8,4 @@ coverage
 # Prevent checked-in build artifacts from src/
 src/**/*.js
 src/**/*.js.map
+package-lock.json
