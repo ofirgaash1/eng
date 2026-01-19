@@ -31,7 +31,10 @@ export default function App() {
     const root = document.documentElement.style;
     root.setProperty("--subtitle-font-family", subtitleStyle.fontFamily);
     root.setProperty("--subtitle-font-size", `${subtitleStyle.fontSizePx}px`);
-    root.setProperty("--subtitle-secondary-font-size", `${subtitleStyle.secondaryFontSizePx}px`);
+    const secondarySize = subtitleStyle.useMainForSecondaryFontSize
+      ? subtitleStyle.fontSizePx
+      : subtitleStyle.secondaryFontSizePx;
+    root.setProperty("--subtitle-secondary-font-size", `${secondarySize}px`);
     root.setProperty("--subtitle-font-weight", `${subtitleStyle.fontWeight}`);
     root.setProperty("--subtitle-color", subtitleStyle.color);
     root.setProperty("--subtitle-bg", subtitleStyle.bgColor);

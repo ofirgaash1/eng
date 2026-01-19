@@ -5,18 +5,6 @@ const API_BASE = "https://api.opensubtitles.com/api/v1";
 const DEFAULT_API_KEY = "Er4Y8GbS7JoCcLf9oJmjc2noj2wIsrNu";
 const API_CONSUMER_NAME = "ofir gaash v1.0";
 
-const formatBytes = (bytes: number) => {
-  if (!bytes) return "0 B";
-  const units = ["B", "KB", "MB", "GB"];
-  let size = bytes;
-  let index = 0;
-  while (size >= 1024 && index < units.length - 1) {
-    size /= 1024;
-    index += 1;
-  }
-  return `${size.toFixed(1)} ${units[index]}`;
-};
-
 const readChunk = async (file: File, start: number, length: number) => {
   const slice = file.slice(start, start + length);
   const buffer = await slice.arrayBuffer();
@@ -72,7 +60,7 @@ type SubtitleItem = {
   downloadLink?: string;
 };
 
-type SortField = "title" | "language" | "downloads" | "hearingImpaired" | "fileSize";
+type SortField = "title" | "downloads" | "hearingImpaired";
 type SortDirection = "asc" | "desc";
 
 const buildHeaders = (apiKey: string) => ({
@@ -252,24 +240,16 @@ export default function VlsubPage() {
     if (!results) return null;
     const direction = sortDirection === "asc" ? 1 : -1;
     return [...results].sort((a, b) => {
-      const aTitle = a.attributes.release || a.attributes.feature_details?.title || "Untitled release";
-      const bTitle = b.attributes.release || b.attributes.feature_details?.title || "Untitled release";
-      const aFile = a.attributes.files?.[0];
-      const bFile = b.attributes.files?.[0];
-      const aFileSize = aFile?.file_size ?? 0;
-      const bFileSize = bFile?.file_size ?? 0;
+      const aTitle = a.attributes.files?.[0]?.file_name ?? "Untitled release";
+      const bTitle = b.attributes.files?.[0]?.file_name ?? "Untitled release";
 
       switch (sortField) {
         case "title":
           return aTitle.localeCompare(bTitle, undefined, { sensitivity: "base" }) * direction;
-        case "language":
-          return a.attributes.language.localeCompare(b.attributes.language) * direction;
         case "downloads":
           return ((a.attributes.download_count ?? 0) - (b.attributes.download_count ?? 0)) * direction;
         case "hearingImpaired":
           return (Number(a.attributes.hearing_impaired) - Number(b.attributes.hearing_impaired)) * direction;
-        case "fileSize":
-          return (aFileSize - bFileSize) * direction;
         default:
           return 0;
       }
@@ -444,16 +424,6 @@ export default function VlsubPage() {
                     <th className="px-4 py-3">
                       <button
                         type="button"
-                        onClick={() => toggleSort("language")}
-                        className="flex items-center gap-2 hover:text-white"
-                      >
-                        Language
-                        {sortField === "language" ? (sortDirection === "asc" ? "▲" : "▼") : null}
-                      </button>
-                    </th>
-                    <th className="px-4 py-3">
-                      <button
-                        type="button"
                         onClick={() => toggleSort("downloads")}
                         className="flex items-center gap-2 hover:text-white"
                       >
@@ -475,41 +445,21 @@ export default function VlsubPage() {
                           : null}
                       </button>
                     </th>
-                    <th className="px-4 py-3">
-                      <button
-                        type="button"
-                        onClick={() => toggleSort("fileSize")}
-                        className="flex items-center gap-2 hover:text-white"
-                      >
-                        Size
-                        {sortField === "fileSize" ? (sortDirection === "asc" ? "▲" : "▼") : null}
-                      </button>
-                    </th>
                     <th className="px-4 py-3 text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
                   {sortedResults.map((item) => {
-                    const title =
-                      item.attributes.release ||
-                      item.attributes.feature_details?.title ||
-                      "Untitled release";
                     const fileInfo = item.attributes.files?.[0];
-                    const fileName =
-                      fileInfo?.file_name ? `File: ${fileInfo.file_name}` : "File name unavailable";
+                    const fileName = fileInfo?.file_name ?? "Untitled release";
                     return (
                       <tr key={item.id} className="bg-white/5">
                         <td className="px-4 py-3">
-                          <div className="font-semibold text-white">{title}</div>
-                          <div className="text-xs text-white/50">{fileName}</div>
+                          <div className="font-semibold text-white">{fileName}</div>
                         </td>
-                        <td className="px-4 py-3 text-xs">{item.attributes.language}</td>
                         <td className="px-4 py-3 text-xs">{item.attributes.download_count ?? "-"}</td>
                         <td className="px-4 py-3 text-xs">
                           {item.attributes.hearing_impaired ? "Yes" : "No"}
-                        </td>
-                        <td className="px-4 py-3 text-xs">
-                          {fileInfo?.file_size ? formatBytes(fileInfo.file_size) : "-"}
                         </td>
                         <td className="px-4 py-3 text-right text-xs">
                           {item.downloadLink ? (
@@ -517,7 +467,7 @@ export default function VlsubPage() {
                               href={item.downloadLink}
                               target="_blank"
                               rel="noreferrer"
-                              className="rounded-full border border-white/20 px-3 py-1 text-xs text-white/80 transition hover:bg-white/10"
+                              className="inline-flex min-w-[9.5rem] items-center justify-center rounded-full border border-white/20 px-3 py-1 text-xs text-white/80 transition hover:bg-white/10"
                             >
                               Download subtitle
                             </a>
@@ -526,7 +476,7 @@ export default function VlsubPage() {
                               type="button"
                               onClick={() => handleDownload(item)}
                               disabled={isSearching}
-                              className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
+                              className="inline-flex min-w-[9.5rem] items-center justify-center whitespace-nowrap rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
                             >
                               Get download link
                             </button>

@@ -43,6 +43,7 @@ export interface UserPrefs {
     fontFamily: string;
     fontSizePx: number;
     secondaryFontSizePx: number;
+    useMainForSecondaryFontSize: boolean;
     fontWeight: number;
     color: string;
     outline: boolean;

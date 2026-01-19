@@ -17,6 +17,7 @@ const defaultPrefs: UserPrefs = {
     fontFamily: "Inter",
     fontSizePx: 42,
     secondaryFontSizePx: 36,
+    useMainForSecondaryFontSize: true,
     fontWeight: 600,
     color: "#ffffff",
     outline: true,
