@@ -96,6 +96,7 @@ export default function PlayerPage() {
   const latestParseRef = useRef<{ primary?: string; secondary?: string }>({});
   const [videoName, setVideoName] = useState<string>("");
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [savedVideoTime, setSavedVideoTime] = useState<number | null>(null);
   const [subtitleName, setSubtitleName] = useState<string>("");
   const [cues, setCues] = useState<Cue[]>([]);
   const [currentTimeMs, setCurrentTimeMs] = useState<number>(0);
@@ -109,6 +110,7 @@ export default function PlayerPage() {
   const [secondarySubtitleError, setSecondarySubtitleError] = useState<string | null>(null);
   const [secondarySubtitleEnabled, setSecondarySubtitleEnabled] = useState<boolean>(false);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const lastVideoTimeSavedRef = useRef<number>(0);
   const addWord = useDictionaryStore((state) => state.addUnknownWordFromToken);
   const classForToken = useDictionaryStore((state) => state.classForToken);
   const initializeDictionary = useDictionaryStore((state) => state.initialize);
@@ -293,6 +295,9 @@ export default function PlayerPage() {
       if (session.subtitleName) {
         setSubtitleName(session.subtitleName);
       }
+      if (typeof session.videoTimeSeconds === "number") {
+        setSavedVideoTime(session.videoTimeSeconds);
+      }
       if (session.secondarySubtitleName) {
         setSecondarySubtitleName(session.secondarySubtitleName);
       }
@@ -444,6 +449,22 @@ export default function PlayerPage() {
     if (!video) return;
     video.currentTime = 0;
   }, [videoUrl]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || savedVideoTime === null) return;
+    const handleLoaded = () => {
+      video.currentTime = savedVideoTime;
+    };
+    if (video.readyState >= 1) {
+      handleLoaded();
+      return;
+    }
+    video.addEventListener("loadedmetadata", handleLoaded);
+    return () => {
+      video.removeEventListener("loadedmetadata", handleLoaded);
+    };
+  }, [savedVideoTime, videoUrl]);
 
   useEffect(() => {
     if (!prefsInitialized) return;
@@ -612,6 +633,8 @@ export default function PlayerPage() {
       }
 
       resetPlayback();
+      setSavedVideoTime(0);
+      lastVideoTimeSavedRef.current = 0;
       setVideoName(videoFile.name);
       setCurrentTimeMs(0);
       setVideoUrl((previous) => {
@@ -621,7 +644,7 @@ export default function PlayerPage() {
         return URL.createObjectURL(videoFile);
       });
 
-      void saveLastSession({ videoName: videoFile.name, videoBlob: videoFile });
+      void saveLastSession({ videoName: videoFile.name, videoBlob: videoFile, videoTimeSeconds: 0 });
 
       const baseName = videoFile.name.replace(/\.[^.]+$/, "").toLowerCase();
       const matchingSubtitle = fileArray.find(
@@ -663,8 +686,12 @@ export default function PlayerPage() {
 
   const handleTimeUpdate = () => {
     const video = videoRef.current;
-    if (!video || (cues.length === 0 && secondaryCues.length === 0)) return;
+    if (!video) return;
     setCurrentTimeMs(video.currentTime * 1000);
+    if (video.currentTime - lastVideoTimeSavedRef.current >= 2) {
+      lastVideoTimeSavedRef.current = video.currentTime;
+      void saveLastSession({ videoTimeSeconds: video.currentTime });
+    }
   };
 
   const activeCues = useMemo(
@@ -814,7 +841,7 @@ export default function PlayerPage() {
                 {activeSecondaryCues.map((cue) => (
                   <div
                     key={`${cue.startMs}-${cue.endMs}`}
-                    className="subtitle-overlay max-w-3xl text-center"
+                    className="subtitle-overlay subtitle-overlay-secondary max-w-3xl text-center"
                   >
                     <SubtitleCue
                       cue={cue}

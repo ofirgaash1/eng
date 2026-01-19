@@ -16,6 +16,7 @@ const defaultPrefs: UserPrefs = {
   subtitleStyle: {
     fontFamily: "Inter",
     fontSizePx: 42,
+    secondaryFontSizePx: 36,
     fontWeight: 600,
     color: "#ffffff",
     outline: true,

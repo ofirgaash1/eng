@@ -35,6 +35,10 @@ body {
     border-radius: 0.75rem;
   }
 
+  .subtitle-overlay-secondary {
+    font-size: var(--subtitle-secondary-font-size, 36px);
+  }
+
   .hl-exact {
     background: color-mix(in srgb, var(--highlight-exact) 35%, transparent);
   }

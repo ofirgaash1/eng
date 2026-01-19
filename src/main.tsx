@@ -11,6 +11,16 @@ const basename =
     ? resolvedBase.slice(0, -1)
     : resolvedBase;
 
+const redirectPath = new URLSearchParams(window.location.search).get("path");
+if (redirectPath) {
+  const decodedPath = decodeURIComponent(redirectPath);
+  const basePrefix = basename === "/" ? "" : basename;
+  const normalizedPath = decodedPath.startsWith(basePrefix)
+    ? decodedPath.slice(basePrefix.length) || "/"
+    : decodedPath;
+  window.history.replaceState(null, "", `${basename}${normalizedPath}`);
+}
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <BrowserRouter basename={basename}>

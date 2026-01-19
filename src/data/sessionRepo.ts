@@ -19,6 +19,7 @@ export async function saveLastSession(
     subtitleName: current?.subtitleName,
     subtitleText: current?.subtitleText,
     subtitleHash: current?.subtitleHash,
+    videoTimeSeconds: current?.videoTimeSeconds,
     secondarySubtitleName: current?.secondarySubtitleName,
     secondarySubtitleText: current?.secondarySubtitleText,
     secondarySubtitleHash: current?.secondarySubtitleHash,
@@ -40,6 +41,9 @@ export async function saveLastSession(
   }
   if (Object.prototype.hasOwnProperty.call(updates, "subtitleHash")) {
     next.subtitleHash = updates.subtitleHash;
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, "videoTimeSeconds")) {
+    next.videoTimeSeconds = updates.videoTimeSeconds;
   }
   if (Object.prototype.hasOwnProperty.call(updates, "secondarySubtitleName")) {
     next.secondarySubtitleName = updates.secondarySubtitleName;

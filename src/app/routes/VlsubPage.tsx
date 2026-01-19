@@ -72,6 +72,9 @@ type SubtitleItem = {
   downloadLink?: string;
 };
 
+type SortField = "title" | "language" | "downloads" | "hearingImpaired" | "fileSize";
+type SortDirection = "asc" | "desc";
+
 const buildHeaders = (apiKey: string) => ({
   "Api-Key": apiKey.trim(),
   "Content-Type": "application/json",
@@ -121,6 +124,8 @@ export default function VlsubPage() {
   });
   const [results, setResults] = useState<SubtitleItem[] | null>(null);
   const [isSearching, setIsSearching] = useState(false);
+  const [sortField, setSortField] = useState<SortField>("downloads");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
   const updateStatus = useCallback(
     (summary: string, tone: StatusTone = "neutral", details?: string) => {
@@ -243,6 +248,45 @@ export default function VlsubPage() {
   const statusLabel = status.summary || "";
 
   const resultsEmpty = useMemo(() => results !== null && results.length === 0, [results]);
+  const sortedResults = useMemo(() => {
+    if (!results) return null;
+    const direction = sortDirection === "asc" ? 1 : -1;
+    return [...results].sort((a, b) => {
+      const aTitle = a.attributes.release || a.attributes.feature_details?.title || "Untitled release";
+      const bTitle = b.attributes.release || b.attributes.feature_details?.title || "Untitled release";
+      const aFile = a.attributes.files?.[0];
+      const bFile = b.attributes.files?.[0];
+      const aFileSize = aFile?.file_size ?? 0;
+      const bFileSize = bFile?.file_size ?? 0;
+
+      switch (sortField) {
+        case "title":
+          return aTitle.localeCompare(bTitle, undefined, { sensitivity: "base" }) * direction;
+        case "language":
+          return a.attributes.language.localeCompare(b.attributes.language) * direction;
+        case "downloads":
+          return ((a.attributes.download_count ?? 0) - (b.attributes.download_count ?? 0)) * direction;
+        case "hearingImpaired":
+          return (Number(a.attributes.hearing_impaired) - Number(b.attributes.hearing_impaired)) * direction;
+        case "fileSize":
+          return (aFileSize - bFileSize) * direction;
+        default:
+          return 0;
+      }
+    });
+  }, [results, sortDirection, sortField]);
+
+  const toggleSort = useCallback(
+    (field: SortField) => {
+      if (sortField === field) {
+        setSortDirection((previous) => (previous === "asc" ? "desc" : "asc"));
+        return;
+      }
+      setSortField(field);
+      setSortDirection("desc");
+    },
+    [sortField],
+  );
 
   return (
     <div className="space-y-8">
@@ -257,7 +301,7 @@ export default function VlsubPage() {
         </p>
       </header>
 
-      <section className="grid gap-6 lg:grid-cols-[repeat(3,minmax(0,1fr))]">
+      <section className="grid gap-6 lg:grid-cols-2">
         <div className="rounded-2xl border border-white/10 bg-white/5 p-6 shadow-md">
           <h3 className="text-lg font-semibold text-white">1. Connect to OpenSubtitles</h3>
           <p className="mt-2 text-sm text-white/60">
@@ -314,9 +358,12 @@ export default function VlsubPage() {
               id="language"
               value={language}
               onChange={(event) => setLanguage(event.target.value)}
-              className="rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-sm text-white focus:border-white/40 focus:outline-none"
+              className="rounded-lg border border-white/20 bg-white px-3 py-2 text-sm text-slate-900 focus:border-white/40 focus:outline-none"
             >
               <option value="en">English</option>
+              <option value="he">Hebrew</option>
+              <option value="ar">Arabic</option>
+              <option value="hi">Hindi</option>
               <option value="es">Spanish</option>
               <option value="fr">French</option>
               <option value="de">German</option>
@@ -368,69 +415,130 @@ export default function VlsubPage() {
             ) : null}
           </div>
         </div>
+      </section>
 
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-6 shadow-md">
-          <h3 className="text-lg font-semibold text-white">3. Download your subtitle</h3>
-          <div id="results" className="mt-4 space-y-4">
-            {results === null ? (
-              <p className="text-sm text-white/60">Search results will appear here.</p>
-            ) : null}
-            {resultsEmpty ? (
-              <p className="text-sm text-white/60">No subtitles found. Try another search.</p>
-            ) : null}
-            {results?.map((item) => {
-              const title =
-                item.attributes.release ||
-                item.attributes.feature_details?.title ||
-                "Untitled release";
-              const fileInfo = item.attributes.files?.[0];
-
-              return (
-                <div
-                  key={item.id}
-                  className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-white"
-                >
-                  <h4 className="text-base font-semibold text-white">{title}</h4>
-                  <div className="mt-2 flex flex-wrap gap-3 text-xs text-white/70">
-                    <span>Language: {item.attributes.language}</span>
-                    <span>Downloads: {item.attributes.download_count ?? "-"}</span>
-                    <span>
-                      Hearing impaired: {item.attributes.hearing_impaired ? "Yes" : "No"}
-                    </span>
-                  </div>
-                  <div className="mt-2 text-xs text-white/60">
-                    {fileInfo?.file_name ? `File: ${fileInfo.file_name}` : "File name unavailable"}
-                  </div>
-                  {fileInfo?.file_size ? (
-                    <div className="text-xs text-white/60">
-                      Size: {formatBytes(fileInfo.file_size)}
-                    </div>
-                  ) : null}
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {item.downloadLink ? (
-                      <a
-                        href={item.downloadLink}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="rounded-full border border-white/20 px-3 py-1 text-xs text-white/80 transition hover:bg-white/10"
-                      >
-                        Download subtitle
-                      </a>
-                    ) : (
+      <section className="rounded-2xl border border-white/10 bg-white/5 p-6 shadow-md">
+        <h3 className="text-lg font-semibold text-white">3. Download your subtitle</h3>
+        <div id="results" className="mt-4 space-y-4">
+          {results === null ? (
+            <p className="text-sm text-white/60">Search results will appear here.</p>
+          ) : null}
+          {resultsEmpty ? (
+            <p className="text-sm text-white/60">No subtitles found. Try another search.</p>
+          ) : null}
+          {sortedResults && sortedResults.length > 0 ? (
+            <div className="overflow-hidden rounded-xl border border-white/10">
+              <table className="w-full text-left text-sm text-white/80">
+                <thead className="bg-white/10 text-xs uppercase tracking-wide text-white/60">
+                  <tr>
+                    <th className="px-4 py-3">
                       <button
                         type="button"
-                        onClick={() => handleDownload(item)}
-                        disabled={isSearching}
-                        className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
+                        onClick={() => toggleSort("title")}
+                        className="flex items-center gap-2 hover:text-white"
                       >
-                        Get download link
+                        Title
+                        {sortField === "title" ? (sortDirection === "asc" ? "▲" : "▼") : null}
                       </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                    </th>
+                    <th className="px-4 py-3">
+                      <button
+                        type="button"
+                        onClick={() => toggleSort("language")}
+                        className="flex items-center gap-2 hover:text-white"
+                      >
+                        Language
+                        {sortField === "language" ? (sortDirection === "asc" ? "▲" : "▼") : null}
+                      </button>
+                    </th>
+                    <th className="px-4 py-3">
+                      <button
+                        type="button"
+                        onClick={() => toggleSort("downloads")}
+                        className="flex items-center gap-2 hover:text-white"
+                      >
+                        Downloads
+                        {sortField === "downloads" ? (sortDirection === "asc" ? "▲" : "▼") : null}
+                      </button>
+                    </th>
+                    <th className="px-4 py-3">
+                      <button
+                        type="button"
+                        onClick={() => toggleSort("hearingImpaired")}
+                        className="flex items-center gap-2 hover:text-white"
+                      >
+                        Hearing impaired
+                        {sortField === "hearingImpaired"
+                          ? sortDirection === "asc"
+                            ? "▲"
+                            : "▼"
+                          : null}
+                      </button>
+                    </th>
+                    <th className="px-4 py-3">
+                      <button
+                        type="button"
+                        onClick={() => toggleSort("fileSize")}
+                        className="flex items-center gap-2 hover:text-white"
+                      >
+                        Size
+                        {sortField === "fileSize" ? (sortDirection === "asc" ? "▲" : "▼") : null}
+                      </button>
+                    </th>
+                    <th className="px-4 py-3 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {sortedResults.map((item) => {
+                    const title =
+                      item.attributes.release ||
+                      item.attributes.feature_details?.title ||
+                      "Untitled release";
+                    const fileInfo = item.attributes.files?.[0];
+                    const fileName =
+                      fileInfo?.file_name ? `File: ${fileInfo.file_name}` : "File name unavailable";
+                    return (
+                      <tr key={item.id} className="bg-white/5">
+                        <td className="px-4 py-3">
+                          <div className="font-semibold text-white">{title}</div>
+                          <div className="text-xs text-white/50">{fileName}</div>
+                        </td>
+                        <td className="px-4 py-3 text-xs">{item.attributes.language}</td>
+                        <td className="px-4 py-3 text-xs">{item.attributes.download_count ?? "-"}</td>
+                        <td className="px-4 py-3 text-xs">
+                          {item.attributes.hearing_impaired ? "Yes" : "No"}
+                        </td>
+                        <td className="px-4 py-3 text-xs">
+                          {fileInfo?.file_size ? formatBytes(fileInfo.file_size) : "-"}
+                        </td>
+                        <td className="px-4 py-3 text-right text-xs">
+                          {item.downloadLink ? (
+                            <a
+                              href={item.downloadLink}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="rounded-full border border-white/20 px-3 py-1 text-xs text-white/80 transition hover:bg-white/10"
+                            >
+                              Download subtitle
+                            </a>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleDownload(item)}
+                              disabled={isSearching}
+                              className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              Get download link
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
         </div>
       </section>
 
