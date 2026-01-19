@@ -20,7 +20,7 @@ export default function SettingsPage() {
 
   const handleNumberChange = (
     event: ChangeEvent<HTMLInputElement>,
-    key: "fontSizePx" | "fontWeight" | "lineHeight"
+    key: "fontSizePx" | "secondaryFontSizePx" | "fontWeight" | "lineHeight"
   ) => {
     const value = Number(event.target.value);
     if (Number.isFinite(value)) {
@@ -84,6 +84,17 @@ export default function SettingsPage() {
               max={96}
               value={subtitleStyle.fontSizePx}
               onChange={(event) => handleNumberChange(event, "fontSizePx")}
+              className="rounded-md border border-white/10 bg-black/40 px-3 py-2 text-white focus:border-white/40 focus:outline-none"
+            />
+          </label>
+          <label className="flex flex-col gap-2 text-sm">
+            <span className="text-white/70">Second subtitle font size (px)</span>
+            <input
+              type="number"
+              min={16}
+              max={96}
+              value={subtitleStyle.secondaryFontSizePx}
+              onChange={(event) => handleNumberChange(event, "secondaryFontSizePx")}
               className="rounded-md border border-white/10 bg-black/40 px-3 py-2 text-white focus:border-white/40 focus:outline-none"
             />
           </label>
