@@ -42,6 +42,8 @@ export interface UserPrefs {
   subtitleStyle: {
     fontFamily: string;
     fontSizePx: number;
+    secondaryFontSizePx: number;
+    useMainForSecondaryFontSize: boolean;
     fontWeight: number;
     color: string;
     outline: boolean;
@@ -71,6 +73,7 @@ export interface RecentSessionRecord {
   subtitleName?: string;
   subtitleText?: string;
   subtitleHash?: string;
+  videoTimeSeconds?: number;
   secondarySubtitleName?: string;
   secondarySubtitleText?: string;
   secondarySubtitleHash?: string;

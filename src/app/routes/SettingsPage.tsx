@@ -20,7 +20,7 @@ export default function SettingsPage() {
 
   const handleNumberChange = (
     event: ChangeEvent<HTMLInputElement>,
-    key: "fontSizePx" | "fontWeight" | "lineHeight"
+    key: "fontSizePx" | "secondaryFontSizePx" | "fontWeight" | "lineHeight"
   ) => {
     const value = Number(event.target.value);
     if (Number.isFinite(value)) {
@@ -86,6 +86,33 @@ export default function SettingsPage() {
               onChange={(event) => handleNumberChange(event, "fontSizePx")}
               className="rounded-md border border-white/10 bg-black/40 px-3 py-2 text-white focus:border-white/40 focus:outline-none"
             />
+          </label>
+          <label className="flex flex-col gap-2 text-sm">
+            <span className="text-white/70">Second subtitle font size (px)</span>
+            <input
+              type="number"
+              min={16}
+              max={96}
+              value={
+                subtitleStyle.useMainForSecondaryFontSize
+                  ? subtitleStyle.fontSizePx
+                  : subtitleStyle.secondaryFontSizePx
+              }
+              onChange={(event) => handleNumberChange(event, "secondaryFontSizePx")}
+              disabled={subtitleStyle.useMainForSecondaryFontSize}
+              className="rounded-md border border-white/10 bg-black/40 px-3 py-2 text-white focus:border-white/40 focus:outline-none disabled:text-white/40"
+            />
+          </label>
+          <label className="flex items-center gap-3 text-sm">
+            <input
+              type="checkbox"
+              checked={subtitleStyle.useMainForSecondaryFontSize}
+              onChange={(event) =>
+                void updateStyle({ useMainForSecondaryFontSize: event.target.checked })
+              }
+              className="h-4 w-4 rounded border-white/20 bg-black/60"
+            />
+            <span className="text-white/70">Same as main</span>
           </label>
           <label className="flex flex-col gap-2 text-sm">
             <span className="text-white/70">Font weight</span>

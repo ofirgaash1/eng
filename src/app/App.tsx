@@ -5,6 +5,7 @@ import WordsPage from "./routes/WordsPage";
 import QuotesPage from "./routes/QuotesPage";
 import SettingsPage from "./routes/SettingsPage";
 import StatsPage from "./routes/StatsPage";
+import VlsubPage from "./routes/VlsubPage";
 import { usePrefsStore } from "../state/prefsStore";
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
@@ -30,6 +31,10 @@ export default function App() {
     const root = document.documentElement.style;
     root.setProperty("--subtitle-font-family", subtitleStyle.fontFamily);
     root.setProperty("--subtitle-font-size", `${subtitleStyle.fontSizePx}px`);
+    const secondarySize = subtitleStyle.useMainForSecondaryFontSize
+      ? subtitleStyle.fontSizePx
+      : subtitleStyle.secondaryFontSizePx;
+    root.setProperty("--subtitle-secondary-font-size", `${secondarySize}px`);
     root.setProperty("--subtitle-font-weight", `${subtitleStyle.fontWeight}`);
     root.setProperty("--subtitle-color", subtitleStyle.color);
     root.setProperty("--subtitle-bg", subtitleStyle.bgColor);
@@ -61,6 +66,9 @@ export default function App() {
             <NavLink to="/settings" className={navLinkClass}>
               Settings
             </NavLink>
+            <NavLink to="/vlsub" className={navLinkClass}>
+              Find Subs
+            </NavLink>
           </nav>
         </header>
         <main className="flex-1 rounded-lg border border-white/10 bg-white/5 p-6 shadow-xl backdrop-blur">
@@ -70,6 +78,7 @@ export default function App() {
             <Route path="/quotes" element={<QuotesPage />} />
             <Route path="/stats" element={<StatsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/vlsub" element={<VlsubPage />} />
             <Route path="*" element={<PlayerPage />} />
           </Routes>
         </main>
