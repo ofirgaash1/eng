@@ -40,4 +40,26 @@ describe("subtitle display tokens", () => {
     const lastTokens = buildDisplayTokens(tokenize(cues[2].rawText)).map((token) => token.text);
     expect(lastTokens).toEqual(["Hello?"]);
   });
+
+  it("merges RTL punctuation so it does not render mid-sentence", () => {
+    const rtlText = `46
+00:03:52,941 --> 00:03:57,070
+שאלה ארבע, מה ארוחת הבוקר
+?האהובה על מר איגן
+`;
+    const [cue] = parseSrt(rtlText);
+    const tokens = buildDisplayTokens(tokenize(cue.rawText)).map((token) => token.text);
+    expect(tokens).toEqual([
+      "שאלה",
+      "ארבע,",
+      "מה",
+      "ארוחת",
+      "הבוקר?",
+      "האהובה",
+      "על",
+      "מר",
+      "איגן",
+    ]);
+    expect(tokens).not.toContain("?");
+  });
 });
