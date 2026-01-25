@@ -46,6 +46,28 @@ export class SubtitleLearnerDB extends Dexie {
         const sanitized = records.map((word) => ({
           id: word.id,
           original: word.original,
+          originalSentence: word.originalSentence,
+          normalized: word.normalized,
+          stem: word.stem,
+          createdAt: word.createdAt,
+          updatedAt: word.updatedAt,
+        }));
+        return tx.table("words").clear().then(() => tx.table("words").bulkPut(sanitized));
+      });
+    });
+    this.version(4).stores({
+      words: "&id, normalized, stem, updatedAt",
+      subtitleFiles: "&id, bytesHash, addedAt",
+      prefs: "&id, updatedAt",
+      subtitleCues: "&id, fileHash, index",
+      sessions: "&id, updatedAt",
+    });
+    this.version(4).upgrade((tx) => {
+      return tx.table("words").toArray().then((records) => {
+        const sanitized = records.map((word) => ({
+          id: word.id,
+          original: word.original,
+          originalSentence: word.originalSentence,
           normalized: word.normalized,
           stem: word.stem,
           createdAt: word.createdAt,

@@ -13,7 +13,7 @@ interface DictionaryState {
   words: UnknownWord[];
   initialized: boolean;
   initialize: () => Promise<void>;
-  addUnknownWordFromToken: (token: Token | string) => Promise<void>;
+  addUnknownWordFromToken: (token: Token | string, originalSentence?: string) => Promise<void>;
   updateWord: (id: string, updates: Partial<Omit<UnknownWord, "id" | "createdAt">>) => Promise<void>;
   removeWord: (id: string) => Promise<void>;
   importWords: (words: ImportedUnknownWord[]) => Promise<void>;
@@ -23,6 +23,7 @@ interface DictionaryState {
 export interface ImportedUnknownWord {
   id?: string;
   original?: string;
+  originalSentence?: string;
   normalized?: string;
   stem?: string;
   createdAt?: number;
@@ -49,7 +50,7 @@ export const useDictionaryStore = create<DictionaryState>((set, get) => ({
     const stored = await getAllWords();
     set({ words: sortWords(stored), initialized: true });
   },
-  addUnknownWordFromToken: async (input) => {
+  addUnknownWordFromToken: async (input, originalSentence) => {
     const token = normalizeToken(input);
     if (!token || !token.isWord) return;
 
@@ -63,6 +64,7 @@ export const useDictionaryStore = create<DictionaryState>((set, get) => ({
         ...existing,
         updatedAt: now,
         original: existing.original || token.text,
+        originalSentence: originalSentence ?? existing.originalSentence,
       };
       set((state) => ({
         words: sortWords(state.words.map((word) => (word.id === existing.id ? updated : word))),
@@ -74,6 +76,7 @@ export const useDictionaryStore = create<DictionaryState>((set, get) => ({
     const next: UnknownWord = {
       id: nanoid(),
       original: token.text,
+      originalSentence,
       normalized: token.normalized,
       stem: token.stem,
       createdAt: now,
@@ -121,6 +124,7 @@ export const useDictionaryStore = create<DictionaryState>((set, get) => ({
       map.set(key, {
         id: candidate.id ?? previous?.id ?? nanoid(),
         original: candidate.original ?? previous?.original ?? candidate.normalized,
+        originalSentence: candidate.originalSentence ?? previous?.originalSentence,
         normalized: candidate.normalized,
         stem: candidate.stem,
         createdAt: candidate.createdAt ?? previous?.createdAt ?? now,
