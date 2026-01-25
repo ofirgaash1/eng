@@ -68,7 +68,7 @@ function SubtitleCue({
   );
   return (
     <div className={`flex flex-wrap gap-1 ${className ?? ""}`} dir={isRtl ? "rtl" : "ltr"}>
-      {orderedTokens.map((token, index) => (
+      {tokens.map((token, index) => (
         <button
           key={`${token.text}-${index}`}
           type="button"

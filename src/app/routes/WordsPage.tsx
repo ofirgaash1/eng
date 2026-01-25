@@ -575,8 +575,9 @@ export default function WordsPage() {
             {sortDirection === "asc" ? "Ascending" : "Descending"}
           </button>
           <details className="relative">
-            <summary className="cursor-pointer list-none rounded border border-white/10 bg-white/5 px-2 py-1 text-white">
+            <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded border border-white/10 bg-slate-900/80 px-2 py-1 text-white hover:bg-slate-800 focus:outline-none focus-visible:outline-none">
               View
+              <span className="text-[10px] text-white/70">▾</span>
             </summary>
             <div className="absolute left-0 z-10 mt-2 w-56 rounded border border-white/10 bg-slate-900/95 p-3 text-xs text-white shadow-lg">
               {(
