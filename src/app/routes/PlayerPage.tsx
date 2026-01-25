@@ -25,6 +25,46 @@ function formatTime(ms: number) {
   return `${minutes}:${seconds}`;
 }
 
+const RTL_TEXT_RE = /[\u0591-\u07FF\uFB1D-\uFDFD\uFE70-\uFEFC]/;
+const NO_SPACE_BEFORE_RE = /^[\)\]\}»”’.,!?;:%…،؛؟。！？]+$/u;
+const NO_SPACE_AFTER_RE = /^[\(\[\{«“‘]+$/u;
+const RTL_LEADING_PUNCT_RE = /^[.!?…،؛؟]+$/u;
+
+function detectRtlFromCues(cues: Cue[]): boolean {
+  return cues.some((cue) => RTL_TEXT_RE.test(cue.rawText));
+}
+
+function isWordLikeToken(token: Token): boolean {
+  return token.isWord || /^\d+$/.test(token.text);
+}
+
+function isNoSpaceBefore(token: Token): boolean {
+  return !token.isWord && NO_SPACE_BEFORE_RE.test(token.text);
+}
+
+function isNoSpaceAfter(token: Token): boolean {
+  return !token.isWord && NO_SPACE_AFTER_RE.test(token.text);
+}
+
+function shouldAddSpaceBefore(prev: Token | undefined, next: Token): boolean {
+  if (!prev) return false;
+  if (isNoSpaceBefore(next)) return false;
+  if (isNoSpaceAfter(prev)) return false;
+
+  const prevIsWordLike = isWordLikeToken(prev);
+  const nextIsWordLike = isWordLikeToken(next);
+
+  if (prevIsWordLike && nextIsWordLike) return true;
+  if (prevIsWordLike && !nextIsWordLike) return true;
+  if (!prevIsWordLike && nextIsWordLike) return true;
+
+  return false;
+}
+
+function shouldMoveLeadingPunctuation(token: Token): boolean {
+  return !token.isWord && RTL_LEADING_PUNCT_RE.test(token.text);
+}
+
 function openDefinitionSearch(word: string) {
   const query = word.trim();
   if (!query) return;
@@ -34,9 +74,10 @@ function openDefinitionSearch(word: string) {
 
 interface SubtitleCueProps {
   cue: Cue;
-  onTokenClick: (token: Token) => void;
-  onTokenContextMenu: (token: Token) => void;
+  onTokenClick: (token: Token, cue: Cue) => void;
+  onTokenContextMenu: (token: Token, cue: Cue) => void;
   classForToken: (token: Token) => string;
+  isRtl?: boolean;
   className?: string;
 }
 
@@ -51,37 +92,53 @@ function SubtitleCue({
   onTokenClick,
   onTokenContextMenu,
   classForToken,
+  isRtl = false,
   className,
 }: SubtitleCueProps) {
   const tokens = useMemo(() => cue.tokens ?? tokenize(cue.rawText), [cue]);
+  const displayTokens = useMemo(() => {
+    if (!isRtl) return tokens;
+    const firstWordIndex = tokens.findIndex((token) => isWordLikeToken(token));
+    if (firstWordIndex <= 0) return tokens;
+    const leading = tokens.slice(0, firstWordIndex);
+    if (leading.length === 0) return tokens;
+    if (leading.every((token) => shouldMoveLeadingPunctuation(token))) {
+      return [...tokens.slice(firstWordIndex), ...leading];
+    }
+    return tokens;
+  }, [isRtl, tokens]);
   return (
-    <div className={`flex flex-wrap gap-1 ${className ?? ""}`}>
-      {tokens.map((token, index) => (
-        <button
-          key={`${token.text}-${index}`}
-          type="button"
-          className={`rounded px-0.5 text-left ${
-            token.isWord ? "focus:outline-none focus-visible:outline-none" : "cursor-default"
-          }`}
-          onClick={(event) => {
-            if (!token.isWord) return;
-            onTokenClick(token);
-            if (event.currentTarget instanceof HTMLElement) {
-              event.currentTarget.blur();
-            }
-          }}
-          onContextMenu={(event) => {
-            if (!token.isWord) return;
-            event.preventDefault();
-            onTokenContextMenu(token);
-          }}
-          disabled={!token.isWord}
-        >
-          <span className={`rounded px-1 py-0.5 transition-colors ${classForToken(token)}`}>
-            {token.text}
-          </span>
-        </button>
-      ))}
+    <div className={`flex flex-wrap ${className ?? ""}`} dir={isRtl ? "rtl" : "ltr"}>
+      {displayTokens.map((token, index) => {
+        const prevToken = index > 0 ? displayTokens[index - 1] : undefined;
+        const spacingClass = shouldAddSpaceBefore(prevToken, token) ? "ms-1" : "";
+        return (
+          <button
+            key={`${token.text}-${index}`}
+            type="button"
+            className={`rounded px-0.5 text-left ${spacingClass} ${
+              token.isWord ? "focus:outline-none focus-visible:outline-none" : "cursor-default"
+            }`}
+            onClick={(event) => {
+              if (!token.isWord) return;
+              onTokenClick(token, cue);
+              if (event.currentTarget instanceof HTMLElement) {
+                event.currentTarget.blur();
+              }
+            }}
+            onContextMenu={(event) => {
+              if (!token.isWord) return;
+              event.preventDefault();
+              onTokenContextMenu(token, cue);
+            }}
+            disabled={!token.isWord}
+          >
+            <span className={`rounded px-1 py-0.5 transition-colors ${classForToken(token)}`}>
+              {token.text}
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -103,12 +160,14 @@ export default function PlayerPage() {
   const [subtitleLoading, setSubtitleLoading] = useState<boolean>(false);
   const [subtitleOffsetMs, setSubtitleOffsetMs] = useState<number>(0);
   const [subtitleError, setSubtitleError] = useState<string | null>(null);
+  const [isSubtitleRtl, setIsSubtitleRtl] = useState<boolean>(false);
   const [secondarySubtitleName, setSecondarySubtitleName] = useState<string>("");
   const [secondaryCues, setSecondaryCues] = useState<Cue[]>([]);
   const [secondarySubtitleLoading, setSecondarySubtitleLoading] = useState<boolean>(false);
   const [secondarySubtitleOffsetMs, setSecondarySubtitleOffsetMs] = useState<number>(0);
   const [secondarySubtitleError, setSecondarySubtitleError] = useState<string | null>(null);
   const [secondarySubtitleEnabled, setSecondarySubtitleEnabled] = useState<boolean>(false);
+  const [isSecondarySubtitleRtl, setIsSecondarySubtitleRtl] = useState<boolean>(false);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const lastVideoTimeSavedRef = useRef<number>(0);
   const addWord = useDictionaryStore((state) => state.addUnknownWordFromToken);
@@ -120,37 +179,47 @@ export default function PlayerPage() {
   const setLastOpened = usePrefsStore((state) => state.setLastOpened);
 
   const handleTokenClick = useCallback(
-    (token: Token) => {
-      void addWord(token);
+    (token: Token, cue: Cue) => {
+      void addWord(token, cue.rawText);
     },
     [addWord],
   );
 
   const handleTokenContextMenu = useCallback(
-    (token: Token) => {
+    (token: Token, cue: Cue) => {
       openDefinitionSearch(token.text);
-      void addWord(token);
+      void addWord(token, cue.rawText);
     },
     [addWord],
   );
 
+  const applyPrimaryCuesState = useCallback((nextCues: Cue[]) => {
+    setCues(nextCues);
+    setIsSubtitleRtl(nextCues.length > 0 && detectRtlFromCues(nextCues));
+  }, []);
+
+  const applySecondaryCuesState = useCallback((nextCues: Cue[]) => {
+    setSecondaryCues(nextCues);
+    setIsSecondarySubtitleRtl(nextCues.length > 0 && detectRtlFromCues(nextCues));
+  }, []);
+
   const applyParsedCues = useCallback(async (hash: string, fileName: string, parsed: Cue[]) => {
-    setCues(parsed);
+    applyPrimaryCuesState(parsed);
     await Promise.all([
       saveCuesForFile(hash, parsed),
       upsertSubtitleFile({ name: fileName, bytesHash: hash, totalCues: parsed.length }),
     ]);
-  }, []);
+  }, [applyPrimaryCuesState]);
 
   const applyParsedSecondaryCues = useCallback(
     async (hash: string, fileName: string, parsed: Cue[]) => {
-      setSecondaryCues(parsed);
+      applySecondaryCuesState(parsed);
       await Promise.all([
         saveCuesForFile(hash, parsed),
         upsertSubtitleFile({ name: fileName, bytesHash: hash, totalCues: parsed.length }),
       ]);
     },
-    [],
+    [applySecondaryCuesState],
   );
 
   useEffect(() => {
@@ -268,7 +337,7 @@ export default function PlayerPage() {
     return () => {
       worker.removeEventListener("message", handleMessage);
     };
-  }, [applyParsedCues, applyParsedSecondaryCues]);
+  }, [applyParsedCues, applyParsedSecondaryCues, applyPrimaryCuesState, applySecondaryCuesState]);
 
   useEffect(() => {
     let cancelled = false;
@@ -324,7 +393,7 @@ export default function PlayerPage() {
         }
 
         if (cachedSecondary) {
-          setSecondaryCues(cachedSecondary);
+          applySecondaryCuesState(cachedSecondary);
           setSecondarySubtitleLoading(false);
           await upsertSubtitleFile({
             name: session.secondarySubtitleName ?? session.secondarySubtitleHash,
@@ -358,7 +427,7 @@ export default function PlayerPage() {
                 setSecondarySubtitleError(
                   error instanceof Error ? error.message : "Failed to parse secondary subtitles",
                 );
-                setSecondaryCues([]);
+                applySecondaryCuesState([]);
               }
             } finally {
               if (!cancelled) {
@@ -380,7 +449,7 @@ export default function PlayerPage() {
         }
 
         if (cached) {
-          setCues(cached);
+          applyPrimaryCuesState(cached);
           setSubtitleLoading(false);
           await upsertSubtitleFile({
             name: session.subtitleName ?? session.subtitleHash,
@@ -421,7 +490,7 @@ export default function PlayerPage() {
         } catch (error) {
           if (!cancelled) {
             setSubtitleError(error instanceof Error ? error.message : "Failed to parse subtitles");
-            setCues([]);
+            applyPrimaryCuesState([]);
           }
         } finally {
           if (!cancelled) {
@@ -518,7 +587,7 @@ export default function PlayerPage() {
       const hash = await hashBlob(file);
 
       setSubtitleName(file.name);
-      setCues([]);
+      applyPrimaryCuesState([]);
 
       void saveLastSession({
         subtitleName: file.name,
@@ -528,7 +597,7 @@ export default function PlayerPage() {
 
       const cached = await getCuesForFile(hash);
       if (cached) {
-        setCues(cached);
+        applyPrimaryCuesState(cached);
         setSubtitleLoading(false);
         await upsertSubtitleFile({ name: file.name, bytesHash: hash, totalCues: cached.length });
         return;
@@ -551,12 +620,12 @@ export default function PlayerPage() {
         await applyParsedCues(hash, file.name, parsed);
       } catch (error) {
         setSubtitleError(error instanceof Error ? error.message : "Failed to parse subtitles");
-        setCues([]);
+        applyPrimaryCuesState([]);
       } finally {
         setSubtitleLoading(false);
       }
     },
-    [applyParsedCues, resetPlayback],
+    [applyParsedCues, applyPrimaryCuesState, resetPlayback],
   );
 
   const processSecondarySubtitleFile = useCallback(
@@ -567,7 +636,7 @@ export default function PlayerPage() {
       const hash = await hashBlob(file);
 
       setSecondarySubtitleName(file.name);
-      setSecondaryCues([]);
+      applySecondaryCuesState([]);
 
       void saveLastSession({
         secondarySubtitleName: file.name,
@@ -578,7 +647,7 @@ export default function PlayerPage() {
 
       const cached = await getCuesForFile(hash);
       if (cached) {
-        setSecondaryCues(cached);
+        applySecondaryCuesState(cached);
         setSecondarySubtitleLoading(false);
         setSecondarySubtitleEnabled(true);
         await upsertSubtitleFile({ name: file.name, bytesHash: hash, totalCues: cached.length });
@@ -609,12 +678,12 @@ export default function PlayerPage() {
         setSecondarySubtitleError(
           error instanceof Error ? error.message : "Failed to parse secondary subtitles",
         );
-        setSecondaryCues([]);
+        applySecondaryCuesState([]);
       } finally {
         setSecondarySubtitleLoading(false);
       }
     },
-    [applyParsedSecondaryCues],
+    [applyParsedSecondaryCues, applySecondaryCuesState],
   );
 
   const handleVideoUpload = useCallback(
@@ -848,6 +917,7 @@ export default function PlayerPage() {
                       classForToken={classForToken}
                       onTokenClick={handleTokenClick}
                       onTokenContextMenu={handleTokenContextMenu}
+                      isRtl={isSecondarySubtitleRtl}
                       className="justify-center text-center"
                     />
                   </div>
@@ -868,6 +938,7 @@ export default function PlayerPage() {
                       classForToken={classForToken}
                       onTokenClick={handleTokenClick}
                       onTokenContextMenu={handleTokenContextMenu}
+                      isRtl={isSubtitleRtl}
                       className="justify-center text-center"
                     />
                   </div>
@@ -932,6 +1003,15 @@ export default function PlayerPage() {
             <span className="text-xs text-red-400">{subtitleError}</span>
           )}
         </label>
+        <label className="flex items-center gap-2 text-xs text-white/70">
+          <input
+            type="checkbox"
+            checked={isSubtitleRtl}
+            onChange={(event) => setIsSubtitleRtl(event.target.checked)}
+            className="h-3 w-3 rounded border-white/30 bg-slate-900"
+          />
+          Right-to-left order
+        </label>
         <details className="rounded-lg border border-white/10 bg-white/5 p-4 text-sm">
           <summary className="cursor-pointer list-none font-medium text-white/90">
             Second subtitles (optional)
@@ -972,6 +1052,15 @@ export default function PlayerPage() {
               {secondarySubtitleError && (
                 <span className="text-xs text-red-400">{secondarySubtitleError}</span>
               )}
+            </label>
+            <label className="flex items-center gap-2 text-xs text-white/70">
+              <input
+                type="checkbox"
+                checked={isSecondarySubtitleRtl}
+                onChange={(event) => setIsSecondarySubtitleRtl(event.target.checked)}
+                className="h-3 w-3 rounded border-white/30 bg-slate-900"
+              />
+              Right-to-left order
             </label>
             <div className="flex flex-wrap items-center gap-3 rounded-lg bg-white/5 p-2 text-xs text-white/80">
               <span className="font-medium text-white">Second subtitle timing</span>
@@ -1028,6 +1117,7 @@ export default function PlayerPage() {
                     classForToken={classForToken}
                     onTokenClick={handleTokenClick}
                     onTokenContextMenu={handleTokenContextMenu}
+                    isRtl={isSubtitleRtl}
                   />
                 </div>
               ))}

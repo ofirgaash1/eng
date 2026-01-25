@@ -3,6 +3,7 @@ export type WordId = string;
 export interface UnknownWord {
   id: WordId;
   original: string;
+  originalSentence?: string;
   normalized: string;
   stem: string;
   createdAt: number;
