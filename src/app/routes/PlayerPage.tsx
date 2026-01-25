@@ -62,6 +62,10 @@ function SubtitleCue({
   className,
 }: SubtitleCueProps) {
   const tokens = useMemo(() => cue.tokens ?? tokenize(cue.rawText), [cue]);
+  const orderedTokens = useMemo(
+    () => (isRtl ? [...tokens].reverse() : tokens),
+    [isRtl, tokens],
+  );
   return (
     <div className={`flex flex-wrap gap-1 ${className ?? ""}`} dir={isRtl ? "rtl" : "ltr"}>
       {tokens.map((token, index) => (
