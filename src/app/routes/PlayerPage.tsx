@@ -28,7 +28,7 @@ function formatTime(ms: number) {
 const RTL_TEXT_RE = /[\u0591-\u07FF\uFB1D-\uFDFD\uFE70-\uFEFC]/;
 const NO_SPACE_BEFORE_RE = /^[\)\]\}»”’.,!?;:%…،؛؟。！？]+$/u;
 const NO_SPACE_AFTER_RE = /^[\(\[\{«“‘]+$/u;
-const RTL_LEADING_PUNCT_RE = /^[\.\!\?…،؛؟]+$/u;
+const RTL_LEADING_PUNCT_RE = /^[.!?…،؛؟]+$/u;
 
 function detectRtlFromCues(cues: Cue[]): boolean {
   return cues.some((cue) => RTL_TEXT_RE.test(cue.rawText));
