@@ -1185,67 +1185,6 @@ export default function PlayerPage() {
           )}
         </div>
         <div className="flex flex-wrap items-center gap-3 rounded-lg bg-white/5 p-3 text-sm text-white/80">
-          <span className="font-medium text-white">Controls</span>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
-              onClick={() => {
-                togglePlayback();
-                focusPlayerContainer();
-              }}
-              aria-label={isPlaying ? "Pause video" : "Play video"}
-            >
-              {isPlaying ? "Pause" : "Play"} <span className="text-xs text-white/60">(Space/K)</span>
-            </button>
-            <button
-              type="button"
-              className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
-              onClick={() => {
-                toggleMute();
-                focusPlayerContainer();
-              }}
-              aria-label={isMuted ? "Unmute video" : "Mute video"}
-            >
-              {isMuted ? "Unmute" : "Mute"} <span className="text-xs text-white/60">(M)</span>
-            </button>
-            <button
-              type="button"
-              className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
-              onClick={() => {
-                seekBy(-5);
-                focusPlayerContainer();
-              }}
-              aria-label="Seek backward 5 seconds"
-            >
-              -5s <span className="text-xs text-white/60">(←)</span>
-            </button>
-            <button
-              type="button"
-              className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
-              onClick={() => {
-                seekBy(5);
-                focusPlayerContainer();
-              }}
-              aria-label="Seek forward 5 seconds"
-            >
-              +5s <span className="text-xs text-white/60">(→)</span>
-            </button>
-            <button
-              type="button"
-              className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
-              onClick={() => {
-                toggleFullscreen();
-                focusPlayerContainer();
-              }}
-              aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
-            >
-              {isFullscreen ? "Exit Fullscreen" : "Fullscreen"}{" "}
-              <span className="text-xs text-white/60">(F)</span>
-            </button>
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-3 rounded-lg bg-white/5 p-3 text-sm text-white/80">
           <span className="font-medium text-white">Subtitle timing</span>
           <div className="flex items-center gap-2">
             <button
