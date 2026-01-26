@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 
 const HASH_CHUNK_SIZE = 64 * 1024;
 const API_BASE = "https://api.opensubtitles.com/api/v1";
-const DEFAULT_API_KEY = "Er4Y8GbS7JoCcLf9oJmjc2noj2wIsrNu";
+const DEFAULT_API_KEY = "UVUt5ZRVmROJD7ot9JVJY63n8RTIhxYW";
 const API_CONSUMER_NAME = "ofir gaash v1.0";
 
 const readChunk = async (file: File, start: number, length: number) => {
@@ -306,6 +306,12 @@ export default function VlsubPage() {
               onChange={(event) => setApiKey(event.target.value)}
               className="rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-sm text-white placeholder:text-white/40 focus:border-white/40 focus:outline-none"
             />
+            <p className="text-xs text-white/50">
+              if this key doesnt work, try:
+              <span className="mt-1 block">oq1XXcuCnNOnaFDKbknI2pxaQO8TiiU5</span>
+              <span className="mt-1 block">or if you are running locally:</span>
+              <span className="mt-1 block">Er4Y8GbS7JoCcLf9oJmjc2noj2wIsrNu</span>
+            </p>
           </label>
         </div>
 
@@ -319,7 +325,7 @@ export default function VlsubPage() {
             <input
               id="videoFile"
               type="file"
-              accept="video/*"
+              accept="video/*,.mkv,.mp4,.mov,.avi,.wmv,.flv,.webm,.m4v,.mpg,.mpeg"
               onChange={(event) => {
                 const nextFile = event.target.files?.[0] ?? null;
                 setFile(nextFile);
