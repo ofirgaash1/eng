@@ -945,6 +945,10 @@ export default function PlayerPage() {
           <video
             ref={videoRef}
             className="h-full w-full focus:outline-none focus-visible:outline-none"
+            onClick={() => {
+              togglePlayback();
+              focusPlayerContainer();
+            }}
             onTimeUpdate={handleTimeUpdate}
             src={videoUrl ?? undefined}
             tabIndex={-1}
@@ -952,113 +956,131 @@ export default function PlayerPage() {
             <track kind="subtitles" srcLang="en" label={subtitleName || "Subtitles"} />
           </video>
           <div
-            className={`absolute inset-x-0 bottom-0 z-10 flex flex-col gap-2 bg-gradient-to-t from-black/70 via-black/40 to-transparent px-4 pb-4 pt-6 text-white transition-opacity duration-300 ${
+            className={`absolute inset-x-0 bottom-0 z-10 flex flex-col gap-3 bg-gradient-to-t from-black/80 via-black/40 to-transparent px-4 pb-4 pt-6 text-white transition-opacity duration-300 ${
               showControls ? "opacity-100" : "pointer-events-none opacity-0"
             }`}
+            onDoubleClick={(event) => event.stopPropagation()}
           >
-            <input
-              type="range"
-              min={0}
-              max={durationMs ? Math.max(durationMs / 1000, 0) : 0}
-              step={0.1}
-              value={durationMs ? Math.min(currentTimeMs / 1000, durationMs / 1000) : 0}
-              onChange={handleTimelineChange}
-              className="h-2 w-full cursor-pointer accent-white/80"
-              aria-label="Seek position"
-              disabled={!durationMs}
-            />
-            <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  className="rounded bg-white/10 px-3 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
-                  onClick={() => {
-                    togglePlayback();
-                    focusPlayerContainer();
-                  }}
-                  aria-label={isPlaying ? "Pause video" : "Play video"}
-                >
-                  {isPlaying ? "Pause" : "Play"}
-                </button>
-                <button
-                  type="button"
-                  className="rounded bg-white/10 px-3 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
-                  onClick={() => {
-                    toggleMute();
-                    focusPlayerContainer();
-                  }}
-                  aria-label={isMuted ? "Unmute video" : "Mute video"}
-                >
-                  {isMuted ? "Unmute" : "Mute"}
-                </button>
-                <div className="flex items-center gap-2">
-                  <label htmlFor="player-volume" className="text-xs text-white/70">
-                    Volume
-                  </label>
-                  <input
-                    id="player-volume"
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    value={isMuted ? 0 : volume}
-                    onChange={handleVolumeChange}
-                    className="h-2 w-24 cursor-pointer accent-white/80"
-                    aria-label="Volume"
-                  />
-                </div>
-                <div className="flex items-center gap-2">
+            <div className="flex flex-col gap-2">
+              <input
+                type="range"
+                min={0}
+                max={durationMs ? Math.max(durationMs / 1000, 0) : 0}
+                step={0.1}
+                value={durationMs ? Math.min(currentTimeMs / 1000, durationMs / 1000) : 0}
+                onChange={handleTimelineChange}
+                onKeyDown={handleShortcutKeyDownCapture}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  focusPlayerContainer();
+                }}
+                onTouchStart={() => {
+                  focusPlayerContainer();
+                }}
+                className="h-2 w-full cursor-pointer accent-sky-300"
+                aria-label="Seek position"
+                disabled={!durationMs}
+                tabIndex={-1}
+              />
+              <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+                <div className="flex flex-wrap items-center gap-3">
                   <button
                     type="button"
-                    className="rounded bg-white/10 px-2 py-1 text-xs transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+                    className="group flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5 text-lg font-semibold transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
                     onClick={() => {
-                      seekBy(-5);
+                      togglePlayback();
                       focusPlayerContainer();
                     }}
-                    aria-label="Seek backward 5 seconds"
+                    aria-label={isPlaying ? "Pause video" : "Play video"}
                   >
-                    -5s
+                    <span aria-hidden>{isPlaying ? "⏸" : "▶️"}</span>
+                    <span className="text-xs text-white/70 opacity-0 transition-opacity group-hover:opacity-100">
+                      Space/K
+                    </span>
                   </button>
-                  <button
-                    type="button"
-                    className="rounded bg-white/10 px-2 py-1 text-xs transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
-                    onClick={() => {
-                      seekBy(5);
-                      focusPlayerContainer();
-                    }}
-                    aria-label="Seek forward 5 seconds"
-                  >
-                    +5s
-                  </button>
+                  <div className="group flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5 text-lg transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                      onClick={() => {
+                        toggleMute();
+                        focusPlayerContainer();
+                      }}
+                      aria-label={isMuted ? "Unmute video" : "Mute video"}
+                    >
+                      <span aria-hidden>{isMuted ? "🔇" : "🔊"}</span>
+                      <span className="text-xs text-white/70 opacity-0 transition-opacity group-hover:opacity-100">
+                        M
+                      </span>
+                    </button>
+                    <div className="max-w-0 overflow-hidden transition-all duration-300 group-hover:max-w-[120px]">
+                      <input
+                        id="player-volume"
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={isMuted ? 0 : volume}
+                        onChange={handleVolumeChange}
+                        onKeyDown={handleShortcutKeyDownCapture}
+                        className="h-2 w-24 cursor-pointer accent-sky-300"
+                        aria-label="Volume"
+                      />
+                    </div>
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  className="rounded bg-white/10 px-2 py-1 text-xs transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
-                  onClick={() => {
-                    toggleFullscreen();
-                    focusPlayerContainer();
-                  }}
-                  aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
-                >
-                  {isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
-                </button>
+                <div className="flex items-center gap-3 text-xs text-white/70" style={{ fontFamily: '"Comic Sans MS", "Comic Sans", cursive' }}>
+                  {formattedCurrentTime} / {formattedDuration}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex flex-row-reverse items-center gap-2">
+                    <button
+                      type="button"
+                      className="group flex items-center gap-1 rounded-full bg-white/10 px-2.5 py-1.5 text-sm transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                      onClick={() => {
+                        toggleFullscreen();
+                        focusPlayerContainer();
+                      }}
+                      aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+                    >
+                      <span aria-hidden>⛶</span>
+                      <span className="text-xs text-white/70 opacity-0 transition-opacity group-hover:opacity-100">
+                        F
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="group rounded-full bg-white/10 px-2.5 py-1.5 text-xs transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                      onClick={() => {
+                        seekBy(-5);
+                        focusPlayerContainer();
+                      }}
+                      aria-label="Seek backward 5 seconds"
+                    >
+                      -5s{" "}
+                      <span className="text-white/70 opacity-0 transition-opacity group-hover:opacity-100">
+                        ←
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="group rounded-full bg-white/10 px-2.5 py-1.5 text-xs transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                      onClick={() => {
+                        seekBy(5);
+                        focusPlayerContainer();
+                      }}
+                      aria-label="Seek forward 5 seconds"
+                    >
+                      +5s{" "}
+                      <span className="text-white/70 opacity-0 transition-opacity group-hover:opacity-100">
+                        →
+                      </span>
+                    </button>
+                  </div>
+                </div>
               </div>
-              <span className="text-xs text-white/70">
-                {formattedCurrentTime} / {formattedDuration}
-              </span>
             </div>
           </div>
-          <button
-            type="button"
-            className="absolute right-3 top-3 z-10 rounded bg-black/70 px-3 py-1 text-xs font-medium text-white transition hover:bg-black/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
-            onClick={(event) => {
-              event.stopPropagation();
-              toggleFullscreen();
-              focusPlayerContainer();
-            }}
-          >
-            {isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
-          </button>
           {secondarySubtitleEnabled && activeSecondaryCues.length > 0 && (
             <div className="pointer-events-none absolute inset-0 z-20 flex flex-col justify-start p-6">
               <div className="pointer-events-auto flex flex-col items-center gap-3">
