@@ -84,7 +84,10 @@ function SubtitleCue({
 }: SubtitleCueProps) {
   const displayTokens = useDisplayTokens(cue, isRtl);
   return (
-    <div className={`flex flex-wrap ${className ?? ""}`} dir={isRtl ? "rtl" : "ltr"}>
+    <div
+      className={`pointer-events-none flex flex-wrap ${className ?? ""}`}
+      dir={isRtl ? "rtl" : "ltr"}
+    >
       {displayTokens.map((displayToken, index) => {
         const prevToken = index > 0 ? displayTokens[index - 1].token : undefined;
         const token = displayToken.token;
@@ -93,7 +96,7 @@ function SubtitleCue({
           <button
             key={`${displayToken.text}-${index}`}
             type="button"
-            className={`rounded px-0.5 text-left ${spacingClass} ${
+            className={`pointer-events-auto relative z-40 rounded px-0.5 text-left ${spacingClass} ${
               token.isWord ? "focus:outline-none focus-visible:outline-none" : "cursor-default"
             }`}
             onClick={(event) => {
@@ -1016,7 +1019,7 @@ export default function PlayerPage() {
                 <div className="flex flex-wrap items-center gap-3">
                   <button
                     type="button"
-                    className={`group play-variant variant-24 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 ${isPlaying ? "" : "is-paused"}`}
+                    className={`group play-variant variant-24 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 ${isPlaying ? "is-paused" : ""}`}
                     onClick={() => {
                       togglePlayback();
                       focusPlayerContainer();
@@ -1065,7 +1068,7 @@ export default function PlayerPage() {
                   <div className="flex flex-row-reverse items-center gap-2">
                     <button
                       type="button"
-                      className="group player-icon-button text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                      className="group player-icon-button text-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
                       onClick={() => {
                         toggleFullscreen();
                         focusPlayerContainer();
@@ -1077,7 +1080,7 @@ export default function PlayerPage() {
                     </button>
                     <button
                       type="button"
-                      className="group player-pill-button text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                      className="group player-icon-button text-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
                       onClick={() => {
                         seekBy(-5);
                         focusPlayerContainer();
@@ -1088,7 +1091,7 @@ export default function PlayerPage() {
                     </button>
                     <button
                       type="button"
-                      className="group player-pill-button text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                      className="group player-icon-button text-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
                       onClick={() => {
                         seekBy(5);
                         focusPlayerContainer();
@@ -1125,7 +1128,7 @@ export default function PlayerPage() {
                   {activeSecondaryCues.map((cue) => (
                     <div
                       key={`${cue.startMs}-${cue.endMs}`}
-                      className="subtitle-overlay subtitle-overlay-secondary pointer-events-auto max-w-3xl text-center"
+                      className="subtitle-overlay subtitle-overlay-secondary max-w-3xl text-center"
                     >
                       <SubtitleCue
                         cue={cue}
@@ -1164,7 +1167,7 @@ export default function PlayerPage() {
                   {activeCues.map((cue) => (
                     <div
                       key={`${cue.startMs}-${cue.endMs}`}
-                      className="subtitle-overlay pointer-events-auto max-w-3xl text-center"
+                      className="subtitle-overlay max-w-3xl text-center"
                     >
                       <SubtitleCue
                         cue={cue}
