@@ -74,7 +74,7 @@ function useDisplayTokens(cue: Cue, isRtl: boolean) {
   return useMemo(() => buildDisplayTokens(normalizedTokens), [normalizedTokens]);
 }
 
-function SubtitleCue({
+export function SubtitleCue({
   cue,
   onTokenClick,
   onTokenContextMenu,
