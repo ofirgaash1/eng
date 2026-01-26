@@ -1,6 +1,8 @@
 import type { Cue } from "../types";
 
 const TIME_REGEX = /(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})/;
+export const ITALIC_START = "\u0001";
+export const ITALIC_END = "\u0002";
 
 function toMs(timecode: string) {
   const [hours, minutes, rest] = timecode.split(":");
@@ -15,8 +17,9 @@ function toMs(timecode: string) {
 
 function sanitizeCueText(text: string) {
   return text
+    .replace(/<i>/gi, ITALIC_START)
+    .replace(/<\/i>/gi, ITALIC_END)
     .replace(/<[^>]+>/g, "")
-    .replace(/\[[^\]]*]/g, "")
     .replace(/\s+/g, " ")
     .trim();
 }

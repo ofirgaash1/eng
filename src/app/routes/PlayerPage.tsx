@@ -14,6 +14,7 @@ import {
   buildDisplayTokens,
   isWordLikeToken,
   shouldAddSpaceBefore,
+  tokenizeWithItalics,
 } from "../../core/subtitles/displayTokens";
 import { hashBlob } from "../../utils/file";
 import { upsertSubtitleFile } from "../../data/filesRepo";
@@ -71,14 +72,19 @@ function SubtitleCue({
   isRtl = false,
   className,
 }: SubtitleCueProps) {
-  const tokens = useMemo(() => cue.tokens ?? tokenize(cue.rawText), [cue]);
+  const tokens = useMemo(() => {
+    if (cue.tokens) {
+      return cue.tokens.map((token) => ({ token, italic: false }));
+    }
+    return tokenizeWithItalics(cue.rawText);
+  }, [cue]);
   const normalizedTokens = useMemo(() => {
     if (!isRtl) return tokens;
-    const firstWordIndex = tokens.findIndex((token) => isWordLikeToken(token));
+    const firstWordIndex = tokens.findIndex((token) => isWordLikeToken(token.token));
     if (firstWordIndex <= 0) return tokens;
     const leading = tokens.slice(0, firstWordIndex);
     if (leading.length === 0) return tokens;
-    if (leading.every((token) => shouldMoveLeadingPunctuation(token))) {
+    if (leading.every((token) => shouldMoveLeadingPunctuation(token.token))) {
       return [...tokens.slice(firstWordIndex), ...leading];
     }
     return tokens;
@@ -114,7 +120,11 @@ function SubtitleCue({
             }}
             disabled={!token.isWord}
           >
-            <span className={`rounded px-1 py-0.5 transition-colors ${classForToken(token)}`}>
+            <span
+              className={`rounded px-1 py-0.5 transition-colors ${
+                displayToken.italic ? "italic" : ""
+              } ${classForToken(token)}`}
+            >
               {displayToken.text}
             </span>
           </button>

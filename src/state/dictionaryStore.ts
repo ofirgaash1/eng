@@ -1,6 +1,7 @@
 import { nanoid } from "nanoid";
 import { create } from "zustand";
 import type { Token, UnknownWord } from "../core/types";
+import { stem } from "../core/nlp/stem";
 import { tokenize } from "../core/nlp/tokenize";
 import {
   deleteWord as deleteWordFromDb,
@@ -17,6 +18,7 @@ interface DictionaryState {
   updateWord: (id: string, updates: Partial<Omit<UnknownWord, "id" | "createdAt">>) => Promise<void>;
   removeWord: (id: string) => Promise<void>;
   importWords: (words: ImportedUnknownWord[]) => Promise<void>;
+  reanalyzeStems: () => Promise<void>;
   classForToken: (token: Token) => string;
 }
 
@@ -42,13 +44,29 @@ function normalizeToken(token: Token | string) {
   return token;
 }
 
+function applyStemAnalysis(words: UnknownWord[]) {
+  let changed = false;
+  const next = words.map((word) => {
+    const nextStem = stem(word.normalized);
+    if (nextStem === word.stem) return word;
+    changed = true;
+    return { ...word, stem: nextStem };
+  });
+  return { next, changed };
+}
+
 export const useDictionaryStore = create<DictionaryState>((set, get) => ({
   words: [],
   initialized: false,
   initialize: async () => {
     if (get().initialized) return;
     const stored = await getAllWords();
-    set({ words: sortWords(stored), initialized: true });
+    const { next, changed } = applyStemAnalysis(stored);
+    const sorted = sortWords(next);
+    set({ words: sorted, initialized: true });
+    if (changed) {
+      await replaceAllWords(sorted);
+    }
   },
   addUnknownWordFromToken: async (input, originalSentence) => {
     const token = normalizeToken(input);
@@ -117,16 +135,18 @@ export const useDictionaryStore = create<DictionaryState>((set, get) => ({
     }
 
     for (const candidate of incoming) {
-      if (!candidate.normalized || !candidate.stem) continue;
-      const key = `${candidate.normalized}::${candidate.stem}`;
+      if (!candidate.normalized) continue;
+      const normalized = candidate.normalized;
+      const candidateStem = candidate.stem ?? stem(normalized);
+      const key = `${normalized}::${candidateStem}`;
       const previous = map.get(key);
 
       map.set(key, {
         id: candidate.id ?? previous?.id ?? nanoid(),
-        original: candidate.original ?? previous?.original ?? candidate.normalized,
+        original: candidate.original ?? previous?.original ?? normalized,
         originalSentence: candidate.originalSentence ?? previous?.originalSentence,
-        normalized: candidate.normalized,
-        stem: candidate.stem,
+        normalized,
+        stem: candidateStem,
         createdAt: candidate.createdAt ?? previous?.createdAt ?? now,
         updatedAt: candidate.updatedAt ?? now,
       });
@@ -135,6 +155,13 @@ export const useDictionaryStore = create<DictionaryState>((set, get) => ({
     const next = sortWords(Array.from(map.values()));
     set({ words: next, initialized: true });
     await replaceAllWords(next);
+  },
+  reanalyzeStems: async () => {
+    const { next, changed } = applyStemAnalysis(get().words);
+    if (!changed) return;
+    const sorted = sortWords(next);
+    set({ words: sorted });
+    await replaceAllWords(sorted);
   },
   classForToken: (token) => {
     const exact = new Set(get().words.map((word) => word.normalized));

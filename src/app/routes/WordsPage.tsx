@@ -198,6 +198,7 @@ export default function WordsPage() {
   const [rankError, setRankError] = useState<string | null>(null);
   const [sortField, setSortField] = useState<SortField>("updatedAt");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+  const [isReanalyzing, setIsReanalyzing] = useState(false);
   const [visibleColumns, setVisibleColumns] = useState<Record<ViewColumn, boolean>>({
     word: true,
     originalSentence: true,
@@ -214,6 +215,7 @@ export default function WordsPage() {
   const initialize = useDictionaryStore((state) => state.initialize);
   const removeWord = useDictionaryStore((state) => state.removeWord);
   const importWords = useDictionaryStore((state) => state.importWords);
+  const reanalyzeStems = useDictionaryStore((state) => state.reanalyzeStems);
 
   useEffect(() => {
     if (!initialized) {
@@ -390,20 +392,26 @@ export default function WordsPage() {
 
   const handleImport = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
-      const file = event.target.files?.[0];
-      if (!file) return;
+      const files = event.target.files ? Array.from(event.target.files) : [];
+      if (files.length === 0) return;
 
       setIsImporting(true);
       setImportError(null);
       setImportSuccess(null);
 
       try {
-        const text = await file.text();
-        const incoming = file.name.endsWith(".csv")
-          ? parseCsvWordList(text)
-          : parseJsonWordList(text);
-        await importWords(incoming);
-        setImportSuccess(`Imported ${incoming.length} word${incoming.length === 1 ? "" : "s"}.`);
+        let totalImported = 0;
+        for (const file of files) {
+          const text = await file.text();
+          const incoming = file.name.endsWith(".csv")
+            ? parseCsvWordList(text)
+            : parseJsonWordList(text);
+          await importWords(incoming);
+          totalImported += incoming.length;
+        }
+        setImportSuccess(
+          `Imported ${totalImported} word${totalImported === 1 ? "" : "s"}.`,
+        );
       } catch (error) {
         setImportError(error instanceof Error ? error.message : "Failed to import words.");
       } finally {
@@ -413,6 +421,20 @@ export default function WordsPage() {
     },
     [importWords],
   );
+
+  const handleReanalyzeStems = useCallback(async () => {
+    setIsReanalyzing(true);
+    setImportError(null);
+    setImportSuccess(null);
+    try {
+      await reanalyzeStems();
+      setImportSuccess("Re-analyzed stems.");
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : "Failed to re-analyze stems.");
+    } finally {
+      setIsReanalyzing(false);
+    }
+  }, [reanalyzeStems]);
 
   if (!initialized) {
     return (
@@ -466,6 +488,16 @@ export default function WordsPage() {
           </a>
           <button
             type="button"
+            onClick={() => {
+              void handleReanalyzeStems();
+            }}
+            className="rounded bg-white/10 px-3 py-1 text-xs font-medium text-white hover:bg-white/20 disabled:opacity-50"
+            disabled={isReanalyzing}
+          >
+            {isReanalyzing ? "Re-analyzing…" : "Re-analyze"}
+          </button>
+          <button
+            type="button"
             onClick={() => fileInputRef.current?.click()}
             className="rounded bg-white/10 px-3 py-1 text-xs font-medium text-white hover:bg-white/20"
             disabled={isImporting}
@@ -476,6 +508,7 @@ export default function WordsPage() {
             ref={fileInputRef}
             type="file"
             accept=".json,.csv"
+            multiple
             className="hidden"
             onChange={handleImport}
           />
@@ -529,6 +562,16 @@ export default function WordsPage() {
           </a>
           <button
             type="button"
+            onClick={() => {
+              void handleReanalyzeStems();
+            }}
+            className="rounded bg-white/10 px-3 py-1 text-xs font-medium text-white hover:bg-white/20 disabled:opacity-50"
+            disabled={isReanalyzing}
+          >
+            {isReanalyzing ? "Re-analyzing…" : "Re-analyze"}
+          </button>
+          <button
+            type="button"
             onClick={() => fileInputRef.current?.click()}
             className="rounded bg-white/10 px-3 py-1 text-xs font-medium text-white hover:bg-white/20 disabled:opacity-50"
             disabled={isImporting}
@@ -539,6 +582,7 @@ export default function WordsPage() {
             ref={fileInputRef}
             type="file"
             accept=".json,.csv"
+            multiple
             className="hidden"
             onChange={handleImport}
           />

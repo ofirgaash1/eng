@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { tokenize } from "../nlp/tokenize";
-import { parseSrt } from "../parsing/srtParser";
-import { buildDisplayTokens } from "./displayTokens";
+import { ITALIC_END, ITALIC_START, parseSrt } from "../parsing/srtParser";
+import { buildDisplayTokens, tokenizeWithItalics } from "./displayTokens";
 
 const SAMPLE_SRT = `1
 00:00:14,139 --> 00:00:15,419
@@ -29,15 +28,36 @@ Hello?
 `;
 
 describe("subtitle display tokens", () => {
-  it("strips tags and bracket cues before building display tokens", () => {
+  it("strips tags but preserves bracket cues and italics", () => {
     const cues = parseSrt(SAMPLE_SRT);
-    expect(cues.map((cue) => cue.rawText)).toEqual(["Who are you?", "Who are you?", "Hello?"]);
-    expect(cues.some((cue) => /[<>[\]]/.test(cue.rawText))).toBe(false);
+    const cleanedRaw = cues.map((cue) =>
+      cue.rawText.replaceAll(ITALIC_START, "").replaceAll(ITALIC_END, ""),
+    );
+    expect(cleanedRaw).toEqual([
+      "[person on speaker] Who are you?",
+      "Who are you?",
+      "[groans]",
+      "[groans]",
+      "[static feedback]",
+      "Hello?",
+    ]);
+    expect(cues.some((cue) => /<[^>]+>/.test(cue.rawText))).toBe(false);
 
-    const firstTokens = buildDisplayTokens(tokenize(cues[0].rawText)).map((token) => token.text);
-    expect(firstTokens).toEqual(["Who", "are", "you?"]);
+    const firstTokens = buildDisplayTokens(tokenizeWithItalics(cues[0].rawText));
+    expect(firstTokens.map((token) => token.text)).toEqual([
+      "[person",
+      "on",
+      "speaker]",
+      "Who",
+      "are",
+      "you?",
+    ]);
+    expect(firstTokens.slice(0, 3).every((token) => token.italic)).toBe(false);
+    expect(firstTokens.slice(3).every((token) => token.italic)).toBe(true);
 
-    const lastTokens = buildDisplayTokens(tokenize(cues[2].rawText)).map((token) => token.text);
+    const lastTokens = buildDisplayTokens(tokenizeWithItalics(cues[5].rawText)).map(
+      (token) => token.text,
+    );
     expect(lastTokens).toEqual(["Hello?"]);
   });
 
@@ -48,7 +68,9 @@ describe("subtitle display tokens", () => {
 ?האהובה על מר איגן
 `;
     const [cue] = parseSrt(rtlText);
-    const tokens = buildDisplayTokens(tokenize(cue.rawText)).map((token) => token.text);
+    const tokens = buildDisplayTokens(tokenizeWithItalics(cue.rawText)).map(
+      (token) => token.text,
+    );
     expect(tokens).toEqual([
       "שאלה",
       "ארבע,",
