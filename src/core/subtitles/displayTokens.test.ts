@@ -90,4 +90,28 @@ describe("subtitle display tokens", () => {
     ]);
     expect(tokens).not.toContain("?");
   });
+
+  it("keeps RTL question marks attached to the preceding word across line breaks", () => {
+    const rtlText = `133
+00:15:20,838 --> 00:15:25,133
+מארק, אתה מוכן להניח
+?את כרטיס המפתח שלך על שולחני`;
+    const [cue] = parseSrt(rtlText);
+    const tokens = buildDisplayTokens(tokenizeWithItalics(cue.rawText)).map(
+      (token) => token.text,
+    );
+    expect(tokens).toEqual([
+      "מארק,",
+      "אתה",
+      "מוכן",
+      "להניח?",
+      "את",
+      "כרטיס",
+      "המפתח",
+      "שלך",
+      "על",
+      "שולחני",
+    ]);
+    expect(tokens).not.toContain("?");
+  });
 });

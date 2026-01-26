@@ -16,6 +16,7 @@ import {
   shouldAddSpaceBefore,
   tokenizeWithItalics,
 } from "../../core/subtitles/displayTokens";
+import { handlePlayerKeyDown } from "./playerShortcuts";
 import { hashBlob } from "../../utils/file";
 import { upsertSubtitleFile } from "../../data/filesRepo";
 import { getCuesForFile, saveCuesForFile } from "../../data/cuesRepo";
@@ -72,12 +73,7 @@ function SubtitleCue({
   isRtl = false,
   className,
 }: SubtitleCueProps) {
-  const tokens = useMemo(() => {
-    if (cue.tokens) {
-      return cue.tokens.map((token) => ({ token, italic: false }));
-    }
-    return tokenizeWithItalics(cue.rawText);
-  }, [cue]);
+  const tokens = useMemo(() => tokenizeWithItalics(cue.rawText), [cue.rawText]);
   const normalizedTokens = useMemo(() => {
     if (!isRtl) return tokens;
     const firstWordIndex = tokens.findIndex((token) => isWordLikeToken(token.token));
@@ -797,64 +793,13 @@ export default function PlayerPage() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      const video = videoRef.current;
-      if (!video) return;
-
-      const target = event.target as HTMLElement | null;
-      const tagName = target?.tagName;
-      if (tagName && ["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(tagName)) {
-        return;
-      }
-      if (target?.isContentEditable) {
-        return;
-      }
-
-      const activeElement = document.activeElement as HTMLElement | null;
-      if (activeElement) {
-        if (activeElement === video) {
-          video.blur();
-        } else if (activeElement instanceof HTMLElement) {
-          if (activeElement.tagName === "BUTTON") {
-            activeElement.blur();
-          } else if (video.contains(activeElement)) {
-            video.blur();
-          }
-        }
-      }
-
-      switch (event.key) {
-        case " ":
-        case "Spacebar": {
-          event.preventDefault();
-          togglePlayback();
-          break;
-        }
-        case "ArrowLeft": {
-          event.preventDefault();
-          seekBy(-5);
-          break;
-        }
-        case "ArrowRight": {
-          event.preventDefault();
-          seekBy(5);
-          break;
-        }
-        case "f":
-        case "F": {
-          event.preventDefault();
-          toggleFullscreen();
-          break;
-        }
-        case "h":
-        case "H":
-        case "י": {
-          event.preventDefault();
-          toggleSecondarySubtitle();
-          break;
-        }
-        default:
-          break;
-      }
+      handlePlayerKeyDown(event, {
+        video: videoRef.current,
+        seekBy,
+        toggleFullscreen,
+        togglePlayback,
+        toggleSecondarySubtitle,
+      });
     };
 
     window.addEventListener("keydown", handleKeyDown);
