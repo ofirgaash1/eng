@@ -834,6 +834,10 @@ export default function PlayerPage() {
     () => (durationMs ? formatTimeMs(durationMs) : "--:--"),
     [durationMs],
   );
+  const progressPercent = useMemo(() => {
+    if (!durationMs) return 0;
+    return Math.min(100, Math.max(0, (currentTimeMs / durationMs) * 100));
+  }, [currentTimeMs, durationMs]);
 
   const adjustSubtitleOffset = useCallback((deltaMs: number) => {
     setSubtitleOffsetMs((previous) => previous + deltaMs);
@@ -970,38 +974,36 @@ export default function PlayerPage() {
                 value={durationMs ? Math.min(currentTimeMs / 1000, durationMs / 1000) : 0}
                 onChange={handleTimelineChange}
                 onKeyDown={handleShortcutKeyDownCapture}
-                onMouseDown={(event) => {
-                  event.preventDefault();
+                onFocus={(event) => {
+                  event.currentTarget.blur();
                   focusPlayerContainer();
                 }}
-                onTouchStart={() => {
-                  focusPlayerContainer();
-                }}
-                className="h-2 w-full cursor-pointer accent-sky-300"
+                className="player-timeline w-full cursor-pointer"
                 aria-label="Seek position"
                 disabled={!durationMs}
                 tabIndex={-1}
+                style={{
+                  ["--timeline-gradient" as string]: `linear-gradient(90deg, rgba(56, 189, 248, 0.6) 0%, rgba(56, 189, 248, 0.6) ${progressPercent}%, rgba(148, 163, 184, 0.35) ${progressPercent}%, rgba(148, 163, 184, 0.35) 100%)`,
+                }}
               />
               <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
                 <div className="flex flex-wrap items-center gap-3">
                   <button
                     type="button"
-                    className="group flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5 text-lg font-semibold transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                    className={`group player-play-button focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 ${isPlaying ? "" : "is-paused"}`}
                     onClick={() => {
                       togglePlayback();
                       focusPlayerContainer();
                     }}
                     aria-label={isPlaying ? "Pause video" : "Play video"}
                   >
-                    <span aria-hidden>{isPlaying ? "⏸" : "▶️"}</span>
-                    <span className="text-xs text-white/70 opacity-0 transition-opacity group-hover:opacity-100">
-                      Space/K
-                    </span>
+                    <span className="player-play-icon" aria-hidden />
+                    <span className="player-tooltip">Space/K</span>
                   </button>
-                  <div className="group flex items-center gap-2">
+                  <div className="group relative flex items-center gap-2">
                     <button
                       type="button"
-                      className="flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5 text-lg transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                      className="player-icon-button text-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
                       onClick={() => {
                         toggleMute();
                         focusPlayerContainer();
@@ -1009,9 +1011,7 @@ export default function PlayerPage() {
                       aria-label={isMuted ? "Unmute video" : "Mute video"}
                     >
                       <span aria-hidden>{isMuted ? "🔇" : "🔊"}</span>
-                      <span className="text-xs text-white/70 opacity-0 transition-opacity group-hover:opacity-100">
-                        M
-                      </span>
+                      <span className="player-tooltip">M</span>
                     </button>
                     <div className="max-w-0 overflow-hidden transition-all duration-300 group-hover:max-w-[120px]">
                       <input
@@ -1023,20 +1023,23 @@ export default function PlayerPage() {
                         value={isMuted ? 0 : volume}
                         onChange={handleVolumeChange}
                         onKeyDown={handleShortcutKeyDownCapture}
-                        className="h-2 w-24 cursor-pointer accent-sky-300"
+                        className="player-volume w-24 cursor-pointer"
                         aria-label="Volume"
                       />
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-3 text-xs text-white/70" style={{ fontFamily: '"Comic Sans MS", "Comic Sans", cursive' }}>
+                <div
+                  className="flex items-center gap-3 text-xs text-white/70"
+                  style={{ fontFamily: '"Comic Sans MS", "Comic Sans", cursive' }}
+                >
                   {formattedCurrentTime} / {formattedDuration}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <div className="flex flex-row-reverse items-center gap-2">
                     <button
                       type="button"
-                      className="group flex items-center gap-1 rounded-full bg-white/10 px-2.5 py-1.5 text-sm transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                      className="group player-icon-button text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
                       onClick={() => {
                         toggleFullscreen();
                         focusPlayerContainer();
@@ -1044,37 +1047,29 @@ export default function PlayerPage() {
                       aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
                     >
                       <span aria-hidden>⛶</span>
-                      <span className="text-xs text-white/70 opacity-0 transition-opacity group-hover:opacity-100">
-                        F
-                      </span>
+                      <span className="player-tooltip">F</span>
                     </button>
                     <button
                       type="button"
-                      className="group rounded-full bg-white/10 px-2.5 py-1.5 text-xs transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                      className="group player-pill-button text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
                       onClick={() => {
                         seekBy(-5);
                         focusPlayerContainer();
                       }}
                       aria-label="Seek backward 5 seconds"
                     >
-                      -5s{" "}
-                      <span className="text-white/70 opacity-0 transition-opacity group-hover:opacity-100">
-                        ←
-                      </span>
+                      -5s <span className="player-tooltip">←</span>
                     </button>
                     <button
                       type="button"
-                      className="group rounded-full bg-white/10 px-2.5 py-1.5 text-xs transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                      className="group player-pill-button text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
                       onClick={() => {
                         seekBy(5);
                         focusPlayerContainer();
                       }}
                       aria-label="Seek forward 5 seconds"
                     >
-                      +5s{" "}
-                      <span className="text-white/70 opacity-0 transition-opacity group-hover:opacity-100">
-                        →
-                      </span>
+                      +5s <span className="player-tooltip">→</span>
                     </button>
                   </div>
                 </div>
