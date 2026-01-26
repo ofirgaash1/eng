@@ -986,7 +986,7 @@ export default function PlayerPage() {
             <track kind="subtitles" srcLang="en" label={subtitleName || "Subtitles"} />
           </video>
           <div
-            className={`absolute inset-x-0 bottom-0 z-20 flex flex-col gap-3 bg-gradient-to-t from-black/80 via-black/40 to-transparent px-4 pb-4 pt-6 text-white transition-opacity duration-300 ${
+            className={`absolute inset-x-0 bottom-0 z-40 flex flex-col gap-3 bg-gradient-to-t from-black/80 via-black/40 to-transparent px-4 pb-4 pt-6 text-white transition-opacity duration-300 ${
               showControls ? "opacity-100" : "pointer-events-none opacity-0"
             }`}
             onDoubleClick={(event) => event.stopPropagation()}
@@ -1065,7 +1065,7 @@ export default function PlayerPage() {
                   <div className="flex flex-row-reverse items-center gap-2">
                     <button
                       type="button"
-                      className="group player-icon-button text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                      className="group player-icon-button text-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
                       onClick={() => {
                         toggleFullscreen();
                         focusPlayerContainer();
@@ -1077,7 +1077,7 @@ export default function PlayerPage() {
                     </button>
                     <button
                       type="button"
-                      className="group player-pill-button text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                      className="group player-pill-button text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
                       onClick={() => {
                         seekBy(-5);
                         focusPlayerContainer();
@@ -1088,7 +1088,7 @@ export default function PlayerPage() {
                     </button>
                     <button
                       type="button"
-                      className="group player-pill-button text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                      className="group player-pill-button text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
                       onClick={() => {
                         seekBy(5);
                         focusPlayerContainer();
