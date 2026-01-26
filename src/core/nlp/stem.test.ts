@@ -15,16 +15,44 @@ describe("stem", () => {
     expect(stem("thready")).toBe("thready");
   });
 
-  it("covers supported english suffix endings", () => {
+  it("normalizes common inflections", () => {
     const cases: Array<[string, string]> = [
       ["cities", "city"],
-      ["running", "runn"],
-      ["boggled", "boggl"],
+      ["running", "run"],
+      ["boggled", "boggle"],
       ["quickly", "quick"],
-      ["churches", "churche"],
+      ["churches", "church"],
       ["tractors", "tractor"],
       ["goddess", "goddess"],
       ["kindness", "kindness"],
+    ];
+
+    cases.forEach(([input, expected]) => {
+      expect(stem(input)).toBe(expected);
+    });
+  });
+
+  it("handles tricky suffix patterns seen in the wild", () => {
+    const cases: Array<[string, string]> = [
+      ["glossier", "glossy"],
+      ["apprised", "apprise"],
+      ["hemming", "hem"],
+      ["rallied", "rally"],
+      ["piddling", "piddle"],
+      ["swabbed", "swab"],
+      ["mugged", "mug"],
+      ["slurring", "slur"],
+      ["fumigated", "fumigate"],
+      ["roaches", "roach"],
+      ["loquacious", "loquacious"],
+      ["snogging", "snog"],
+      ["boonies", "boonie"],
+      ["haunches", "haunch"],
+      ["stoked", "stoke"],
+      ["strutting", "strut"],
+      ["nauseated", "nauseate"],
+      ["divulging", "divulge"],
+      ["bugging", "bug"],
     ];
 
     cases.forEach(([input, expected]) => {
