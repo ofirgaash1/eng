@@ -336,7 +336,10 @@ export default function WordsPage() {
 
   const handleCopyWordsAndSentences = useCallback(async () => {
     const text = sorted
-      .map((word) => `${word.original},${word.originalSentence ?? ""}`)
+      .map((word) => {
+        const sentence = (word.originalSentence ?? "").trim();
+        return `${word.original}, as in "${sentence}"`;
+      })
       .join("\n");
     if (text.trim() === "") {
       setImportError(null);

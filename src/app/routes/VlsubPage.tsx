@@ -2,7 +2,9 @@ import { useCallback, useMemo, useState } from "react";
 
 const HASH_CHUNK_SIZE = 64 * 1024;
 const API_BASE = "https://api.opensubtitles.com/api/v1";
-const DEFAULT_API_KEY = "UVUt5ZRVmROJD7ot9JVJY63n8RTIhxYW";
+const DEFAULT_API_KEY = "oq1XXcuCnNOnaFDKbknI2pxaQO8TiiU5";
+const LOCAL_API_KEY = "Er4Y8GbS7JoCcLf9oJmjc2noj2wIsrNu";
+const FALLBACK_API_KEY = "UVUt5ZRVmROJD7ot9JVJY63n8RTIhxYW";
 const API_CONSUMER_NAME = "ofir gaash v1.0";
 
 const readChunk = async (file: File, start: number, length: number) => {
@@ -112,6 +114,7 @@ export default function VlsubPage() {
   });
   const [results, setResults] = useState<SubtitleItem[] | null>(null);
   const [isSearching, setIsSearching] = useState(false);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [sortField, setSortField] = useState<SortField>("downloads");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
@@ -232,6 +235,42 @@ export default function VlsubPage() {
     }
   };
 
+  const handleDownloadFile = useCallback(
+    async (item: SubtitleItem) => {
+      if (!item.downloadLink) {
+        updateStatus("Download link not ready yet.", "error");
+        return;
+      }
+      const fileName = item.attributes.files?.[0]?.file_name ?? `subtitle-${item.id}.srt`;
+      setDownloadingId(item.id);
+      updateStatus(`Downloading ${fileName}...`, "loading");
+      try {
+        const response = await fetch(item.downloadLink);
+        if (!response.ok) {
+          const details = await describeResponse(response);
+          throw new Error(`Subtitle download failed.\n${details}`);
+        }
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        updateStatus(`Downloaded ${fileName}.`, "success");
+      } catch (error) {
+        const message = (error as Error).message || "Subtitle download failed.";
+        const [summary, ...rest] = message.split("\n");
+        updateStatus(summary, "error", rest.join("\n"));
+      } finally {
+        setDownloadingId(null);
+      }
+    },
+    [updateStatus],
+  );
+
   const statusToneStyle = toneStyles[status.tone];
   const statusLabel = status.summary || "";
 
@@ -300,18 +339,47 @@ export default function VlsubPage() {
             <span>API Key</span>
             <input
               id="apiKey"
-              type="password"
+              type="text"
               placeholder="Paste your API key"
               value={apiKey}
               onChange={(event) => setApiKey(event.target.value)}
               className="rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-sm text-white placeholder:text-white/40 focus:border-white/40 focus:outline-none"
             />
-            <p className="text-xs text-white/50">
-              if this key doesnt work, try:
-              <span className="mt-1 block">oq1XXcuCnNOnaFDKbknI2pxaQO8TiiU5</span>
-              <span className="mt-1 block">or if you are running locally:</span>
-              <span className="mt-1 block">Er4Y8GbS7JoCcLf9oJmjc2noj2wIsrNu</span>
-            </p>
+            <div className="text-xs text-white/50">
+              <div className="mt-1">If running locally, use:</div>
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-white/70">
+                <span className="rounded bg-white/10 px-2 py-1 text-xs">{LOCAL_API_KEY}</span>
+                <button
+                  type="button"
+                  onClick={() => setApiKey(LOCAL_API_KEY)}
+                  className="rounded border border-white/10 px-2 py-1 text-[11px] text-white/70 transition hover:border-white/30 hover:bg-white/10"
+                >
+                  Use this
+                </button>
+              </div>
+              <div className="mt-2">If running from GitHub, use:</div>
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-white/70">
+                <span className="rounded bg-white/10 px-2 py-1 text-xs">{DEFAULT_API_KEY}</span>
+                <button
+                  type="button"
+                  onClick={() => setApiKey(DEFAULT_API_KEY)}
+                  className="rounded border border-white/10 px-2 py-1 text-[11px] text-white/70 transition hover:border-white/30 hover:bg-white/10"
+                >
+                  Use this
+                </button>
+              </div>
+              <div className="mt-2">Or</div>
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-white/70">
+                <span className="rounded bg-white/10 px-2 py-1 text-xs">{FALLBACK_API_KEY}</span>
+                <button
+                  type="button"
+                  onClick={() => setApiKey(FALLBACK_API_KEY)}
+                  className="rounded border border-white/10 px-2 py-1 text-[11px] text-white/70 transition hover:border-white/30 hover:bg-white/10"
+                >
+                  Use this
+                </button>
+              </div>
+            </div>
           </label>
         </div>
 
@@ -469,14 +537,14 @@ export default function VlsubPage() {
                         </td>
                         <td className="px-4 py-3 text-right text-xs">
                           {item.downloadLink ? (
-                            <a
-                              href={item.downloadLink}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex min-w-[9.5rem] items-center justify-center rounded-full border border-white/20 px-3 py-1 text-xs text-white/80 transition hover:bg-white/10"
+                            <button
+                              type="button"
+                              onClick={() => void handleDownloadFile(item)}
+                              disabled={downloadingId === item.id}
+                              className="inline-flex min-w-[9.5rem] items-center justify-center rounded-full border border-white/20 px-3 py-1 text-xs text-white/80 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
                             >
-                              Download subtitle
-                            </a>
+                              {downloadingId === item.id ? "Downloading..." : "Download subtitle"}
+                            </button>
                           ) : (
                             <button
                               type="button"

@@ -44,6 +44,37 @@ function formatTime(ms: number) {
   return hours > 0 ? `${hours}:${minutes}:${seconds}` : `${minutes}:${seconds}`;
 }
 
+function padSrtNumber(value: number, size: number) {
+  return Math.max(0, value).toString().padStart(size, "0");
+}
+
+function formatSrtTimestamp(ms: number) {
+  const totalMs = Math.max(0, Math.floor(ms));
+  const hours = Math.floor(totalMs / 3600000);
+  const minutes = Math.floor((totalMs % 3600000) / 60000);
+  const seconds = Math.floor((totalMs % 60000) / 1000);
+  const milliseconds = totalMs % 1000;
+  return `${padSrtNumber(hours, 2)}:${padSrtNumber(minutes, 2)}:${padSrtNumber(seconds, 2)},${padSrtNumber(milliseconds, 3)}`;
+}
+
+function buildSrt(cues: Cue[]) {
+  const ordered = [...cues].sort((a, b) => a.index - b.index);
+  const blocks = ordered.map((cue, index) => {
+    const lines = [
+      String(index + 1),
+      `${formatSrtTimestamp(cue.startMs)} --> ${formatSrtTimestamp(cue.endMs)}`,
+      cue.rawText ?? "",
+    ];
+    return lines.join("\n");
+  });
+  return blocks.join("\n\n");
+}
+
+function normalizeSrtName(name: string) {
+  const sanitized = name.replace(/[\\/:*?"<>|]+/g, "_");
+  return sanitized.toLowerCase().endsWith(".srt") ? sanitized : `${sanitized}.srt`;
+}
+
 function tokensMatchWord(tokens: Token[], word: UnknownWord) {
   return tokens.some(
     (token) =>
@@ -75,6 +106,9 @@ export default function QuotesPage() {
   const [libraryLoading, setLibraryLoading] = useState<boolean>(false);
   const [processingFiles, setProcessingFiles] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [downloadStatus, setDownloadStatus] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [downloadAllInProgress, setDownloadAllInProgress] = useState<boolean>(false);
   const [cuesByHash, setCuesByHash] = useState<Record<string, Cue[]>>({});
   const [showSubtitleSources, setShowSubtitleSources] = useState<boolean>(true);
   const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
@@ -91,6 +125,7 @@ export default function QuotesPage() {
   const prefsInitialized = usePrefsStore((state) => state.initialized);
   const initializePrefs = usePrefsStore((state) => state.initialize);
   const mediaLibrary = usePrefsStore((state) => state.prefs.mediaLibrary);
+  const directoryPickerSupported = typeof window !== "undefined" && "showDirectoryPicker" in window;
 
   useEffect(() => {
     if (!dictionaryInitialized) {
@@ -420,6 +455,79 @@ export default function QuotesPage() {
     [refreshLibrary]
   );
 
+  const downloadTextFile = useCallback((name: string, contents: string) => {
+    const blob = new Blob([contents], { type: "application/x-subrip" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = name;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, []);
+
+  const handleDownloadAll = useCallback(async () => {
+    if (library.length === 0) {
+      setDownloadError("No subtitle files to download.");
+      return;
+    }
+    setDownloadStatus(null);
+    setDownloadError(null);
+    setDownloadAllInProgress(true);
+    try {
+      const entries = await Promise.all(
+        library.map(async (file) => {
+          const cues = cuesByHash[file.bytesHash] ?? (await getCuesForFile(file.bytesHash)) ?? [];
+          return {
+            name: normalizeSrtName(file.name),
+            contents: buildSrt(cues),
+          };
+        })
+      );
+
+      if (directoryPickerSupported) {
+        const handle = await (window as typeof window & {
+          showDirectoryPicker?: () => Promise<FileSystemDirectoryHandle>;
+        }).showDirectoryPicker?.();
+        if (!handle) return;
+        const requestPermission = (handle as FileSystemDirectoryHandle & {
+          requestPermission?: (options: unknown) => Promise<PermissionState>;
+        }).requestPermission;
+        if (requestPermission) {
+          const permission = await requestPermission.call(handle, { mode: "readwrite" });
+          if (permission === "denied") {
+            setDownloadError("Folder access denied.");
+            return;
+          }
+        }
+        for (const entry of entries) {
+          const fileHandle = await handle.getFileHandle(entry.name, { create: true });
+          const writable = await fileHandle.createWritable();
+          await writable.write(new Blob([entry.contents], { type: "application/x-subrip" }));
+          await writable.close();
+        }
+        setDownloadStatus(
+          `Saved ${entries.length} subtitle file${entries.length === 1 ? "" : "s"}.`
+        );
+      } else {
+        entries.forEach((entry) => downloadTextFile(entry.name, entry.contents));
+        setDownloadStatus(
+          `Downloaded ${entries.length} subtitle file${entries.length === 1 ? "" : "s"}.`
+        );
+      }
+    } catch (downloadAllError) {
+      setDownloadStatus(null);
+      setDownloadError(
+        downloadAllError instanceof Error
+          ? downloadAllError.message
+          : "Unable to download subtitles."
+      );
+    } finally {
+      setDownloadAllInProgress(false);
+    }
+  }, [cuesByHash, directoryPickerSupported, downloadTextFile, library]);
+
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr,2fr]">
       <section className="space-y-4">
@@ -479,6 +587,18 @@ export default function QuotesPage() {
                     ? "Collapse list"
                     : `Expand list (${library.length})`}
               </button>
+              <button
+                type="button"
+                onClick={() => void handleDownloadAll()}
+                disabled={library.length === 0 || downloadAllInProgress}
+                className={`rounded-md border px-3 py-2 text-xs font-medium text-white transition focus:outline-none focus-visible:outline-none ${
+                  library.length === 0 || downloadAllInProgress
+                    ? "cursor-not-allowed border-white/10 bg-white/5 text-white/40"
+                    : "border-white/20 bg-white/10 hover:border-white/30 hover:bg-white/20"
+                }`}
+              >
+                {downloadAllInProgress ? "Downloading..." : "Download all"}
+              </button>
               <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-dashed border-white/20 bg-white/5 px-3 py-2 text-sm text-white/80 transition hover:border-white/40">
                 <input type="file" accept=".srt" multiple className="hidden" onChange={handleAddFiles} />
                 <span className="font-medium">Add subtitles</span>
@@ -489,6 +609,8 @@ export default function QuotesPage() {
             <p className="mt-3 text-xs text-white/50">Processing subtitle files…</p>
           )}
           {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
+          {downloadError && <p className="mt-2 text-xs text-red-400">{downloadError}</p>}
+          {downloadStatus && <p className="mt-2 text-xs text-emerald-300">{downloadStatus}</p>}
           {showSubtitleSources ? (
             <ul className="mt-4 max-h-64 space-y-2 overflow-y-auto pr-1">
               {libraryLoading ? (
