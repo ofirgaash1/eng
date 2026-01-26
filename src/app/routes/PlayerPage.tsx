@@ -18,20 +18,12 @@ import {
   tokenizeWithItalics,
 } from "../../core/subtitles/displayTokens";
 import { handlePlayerKeyDown } from "./playerShortcuts";
+import { formatTimeMs } from "../../utils/timeFormat";
 import { hashBlob } from "../../utils/file";
 import { upsertSubtitleFile } from "../../data/filesRepo";
 import { getCuesForFile, saveCuesForFile } from "../../data/cuesRepo";
 import { getLastSession, saveLastSession } from "../../data/sessionRepo";
 import { parseSrt } from "../../core/parsing/srtParser";
-
-function formatTime(ms: number) {
-  const totalSeconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60)
-    .toString()
-    .padStart(2, "0");
-  const seconds = (totalSeconds % 60).toString().padStart(2, "0");
-  return `${minutes}:${seconds}`;
-}
 
 const RTL_TEXT_RE = /[\u0591-\u07FF\uFB1D-\uFDFD\uFE70-\uFEFC]/;
 const RTL_LEADING_PUNCT_RE = /^[.!?…،؛؟]+$/u;
@@ -159,6 +151,10 @@ export default function PlayerPage() {
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [isMuted, setIsMuted] = useState<boolean>(false);
+  const [volume, setVolume] = useState<number>(1);
+  const [durationMs, setDurationMs] = useState<number | null>(null);
+  const [showControls, setShowControls] = useState<boolean>(true);
+  const hideControlsTimeoutRef = useRef<number | null>(null);
   const lastVideoTimeSavedRef = useRef<number>(0);
   const addWord = useDictionaryStore((state) => state.addUnknownWordFromToken);
   const classForToken = useDictionaryStore((state) => state.classForToken);
@@ -241,17 +237,29 @@ export default function PlayerPage() {
     if (!video) return;
     const syncPlaybackState = () => setIsPlaying(!video.paused);
     const syncMutedState = () => setIsMuted(video.muted);
+    const syncVolumeState = () => setVolume(video.volume);
+    const syncDuration = () => {
+      setDurationMs(Number.isFinite(video.duration) ? video.duration * 1000 : null);
+    };
 
     syncPlaybackState();
     syncMutedState();
+    syncVolumeState();
+    syncDuration();
 
     video.addEventListener("play", syncPlaybackState);
     video.addEventListener("pause", syncPlaybackState);
     video.addEventListener("volumechange", syncMutedState);
+    video.addEventListener("volumechange", syncVolumeState);
+    video.addEventListener("loadedmetadata", syncDuration);
+    video.addEventListener("durationchange", syncDuration);
     return () => {
       video.removeEventListener("play", syncPlaybackState);
       video.removeEventListener("pause", syncPlaybackState);
       video.removeEventListener("volumechange", syncMutedState);
+      video.removeEventListener("volumechange", syncVolumeState);
+      video.removeEventListener("loadedmetadata", syncDuration);
+      video.removeEventListener("durationchange", syncDuration);
     };
   }, []);
 
@@ -593,6 +601,28 @@ export default function PlayerPage() {
     video.currentTime = nextTime;
   }, []);
 
+  const handleTimelineChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.readyState === 0) return;
+    const nextTimeSeconds = Number(event.target.value);
+    if (!Number.isFinite(nextTimeSeconds)) return;
+    video.currentTime = nextTimeSeconds;
+    setCurrentTimeMs(nextTimeSeconds * 1000);
+  }, []);
+
+  const handleVolumeChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const video = videoRef.current;
+    if (!video) return;
+    const nextVolume = Number(event.target.value);
+    if (!Number.isFinite(nextVolume)) return;
+    video.volume = nextVolume;
+    if (nextVolume > 0) {
+      video.muted = false;
+    }
+    setVolume(nextVolume);
+  }, []);
+
   const processSubtitleFile = useCallback(
     async (file: File) => {
       resetPlayback();
@@ -799,6 +829,12 @@ export default function PlayerPage() {
     [secondaryCues, currentTimeMs, secondarySubtitleOffsetMs],
   );
 
+  const formattedCurrentTime = useMemo(() => formatTimeMs(currentTimeMs), [currentTimeMs]);
+  const formattedDuration = useMemo(
+    () => (durationMs ? formatTimeMs(durationMs) : "--:--"),
+    [durationMs],
+  );
+
   const adjustSubtitleOffset = useCallback((deltaMs: number) => {
     setSubtitleOffsetMs((previous) => previous + deltaMs);
   }, []);
@@ -823,6 +859,26 @@ export default function PlayerPage() {
   const focusPlayerContainer = useCallback(() => {
     playerContainerRef.current?.focus();
   }, []);
+
+  const clearHideControlsTimeout = useCallback(() => {
+    if (hideControlsTimeoutRef.current !== null) {
+      window.clearTimeout(hideControlsTimeoutRef.current);
+      hideControlsTimeoutRef.current = null;
+    }
+  }, []);
+
+  const scheduleHideControls = useCallback(() => {
+    clearHideControlsTimeout();
+    if (!isPlaying) return;
+    hideControlsTimeoutRef.current = window.setTimeout(() => {
+      setShowControls(false);
+    }, 2500);
+  }, [clearHideControlsTimeout, isPlaying]);
+
+  const showControlsNow = useCallback(() => {
+    setShowControls(true);
+    scheduleHideControls();
+  }, [scheduleHideControls]);
 
   const handleShortcutKeyDown = useCallback(
     (event: KeyboardEvent) =>
@@ -855,6 +911,21 @@ export default function PlayerPage() {
     };
   }, [handleShortcutKeyDown]);
 
+  useEffect(() => {
+    if (!isPlaying) {
+      clearHideControlsTimeout();
+      setShowControls(true);
+      return;
+    }
+    scheduleHideControls();
+  }, [clearHideControlsTimeout, isPlaying, scheduleHideControls]);
+
+  useEffect(() => {
+    return () => {
+      clearHideControlsTimeout();
+    };
+  }, [clearHideControlsTimeout]);
+
   return (
     <div className="grid gap-6 lg:grid-cols-[2fr,1fr]" onKeyDown={handleShortcutKeyDownCapture}>
       <section className="space-y-4">
@@ -862,6 +933,13 @@ export default function PlayerPage() {
           ref={playerContainerRef}
           className="relative aspect-video overflow-hidden rounded-lg bg-black shadow-xl"
           onDoubleClick={toggleFullscreen}
+          onMouseMove={showControlsNow}
+          onMouseLeave={() => {
+            if (isPlaying) {
+              setShowControls(false);
+            }
+          }}
+          onFocusCapture={showControlsNow}
           tabIndex={-1}
         >
           <video
@@ -873,6 +951,103 @@ export default function PlayerPage() {
           >
             <track kind="subtitles" srcLang="en" label={subtitleName || "Subtitles"} />
           </video>
+          <div
+            className={`absolute inset-x-0 bottom-0 z-10 flex flex-col gap-2 bg-gradient-to-t from-black/70 via-black/40 to-transparent px-4 pb-4 pt-6 text-white transition-opacity duration-300 ${
+              showControls ? "opacity-100" : "pointer-events-none opacity-0"
+            }`}
+          >
+            <input
+              type="range"
+              min={0}
+              max={durationMs ? Math.max(durationMs / 1000, 0) : 0}
+              step={0.1}
+              value={durationMs ? Math.min(currentTimeMs / 1000, durationMs / 1000) : 0}
+              onChange={handleTimelineChange}
+              className="h-2 w-full cursor-pointer accent-white/80"
+              aria-label="Seek position"
+              disabled={!durationMs}
+            />
+            <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="rounded bg-white/10 px-3 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+                  onClick={() => {
+                    togglePlayback();
+                    focusPlayerContainer();
+                  }}
+                  aria-label={isPlaying ? "Pause video" : "Play video"}
+                >
+                  {isPlaying ? "Pause" : "Play"}
+                </button>
+                <button
+                  type="button"
+                  className="rounded bg-white/10 px-3 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+                  onClick={() => {
+                    toggleMute();
+                    focusPlayerContainer();
+                  }}
+                  aria-label={isMuted ? "Unmute video" : "Mute video"}
+                >
+                  {isMuted ? "Unmute" : "Mute"}
+                </button>
+                <div className="flex items-center gap-2">
+                  <label htmlFor="player-volume" className="text-xs text-white/70">
+                    Volume
+                  </label>
+                  <input
+                    id="player-volume"
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={isMuted ? 0 : volume}
+                    onChange={handleVolumeChange}
+                    className="h-2 w-24 cursor-pointer accent-white/80"
+                    aria-label="Volume"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="rounded bg-white/10 px-2 py-1 text-xs transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+                    onClick={() => {
+                      seekBy(-5);
+                      focusPlayerContainer();
+                    }}
+                    aria-label="Seek backward 5 seconds"
+                  >
+                    -5s
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded bg-white/10 px-2 py-1 text-xs transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+                    onClick={() => {
+                      seekBy(5);
+                      focusPlayerContainer();
+                    }}
+                    aria-label="Seek forward 5 seconds"
+                  >
+                    +5s
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  className="rounded bg-white/10 px-2 py-1 text-xs transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+                  onClick={() => {
+                    toggleFullscreen();
+                    focusPlayerContainer();
+                  }}
+                  aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+                >
+                  {isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
+                </button>
+              </div>
+              <span className="text-xs text-white/70">
+                {formattedCurrentTime} / {formattedDuration}
+              </span>
+            </div>
+          </div>
           <button
             type="button"
             className="absolute right-3 top-3 z-10 rounded bg-black/70 px-3 py-1 text-xs font-medium text-white transition hover:bg-black/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
@@ -885,7 +1060,7 @@ export default function PlayerPage() {
             {isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
           </button>
           {secondarySubtitleEnabled && activeSecondaryCues.length > 0 && (
-            <div className="pointer-events-none absolute inset-0 flex flex-col justify-start p-6">
+            <div className="pointer-events-none absolute inset-0 z-20 flex flex-col justify-start p-6">
               <div className="pointer-events-auto flex flex-col items-center gap-3">
                 {activeSecondaryCues.map((cue) => (
                   <div
@@ -906,7 +1081,7 @@ export default function PlayerPage() {
             </div>
           )}
           {activeCues.length > 0 && (
-            <div className="pointer-events-none absolute inset-0 flex flex-col justify-end p-6">
+            <div className="pointer-events-none absolute inset-0 z-20 flex flex-col justify-end p-6">
               <div className="pointer-events-auto flex flex-col items-center gap-3">
                 {activeCues.map((cue) => (
                   <div
@@ -1139,7 +1314,7 @@ export default function PlayerPage() {
               {activeCues.map((cue) => (
                 <div key={`${cue.startMs}-${cue.endMs}`} className="space-y-2">
                   <div className="text-white/60">
-                    {formatTime(Math.max(0, cue.startMs + subtitleOffsetMs))} – {formatTime(
+                    {formatTimeMs(Math.max(0, cue.startMs + subtitleOffsetMs))} – {formatTimeMs(
                       Math.max(0, cue.endMs + subtitleOffsetMs),
                     )}
                   </div>
