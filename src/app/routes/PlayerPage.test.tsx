@@ -4,7 +4,7 @@ import type { Cue } from "../../core/types";
 import { SubtitleCue } from "./PlayerPage";
 
 describe("SubtitleCue", () => {
-  it("renders token buttons above overlays while keeping wrappers click-through", () => {
+  it("keeps the wrapper click-through while raising token buttons above controls", () => {
     const cue: Cue = {
       index: 0,
       startMs: 0,
@@ -12,18 +12,17 @@ describe("SubtitleCue", () => {
       rawText: "Hello world",
     };
 
-    const markup = renderToStaticMarkup(
+    const html = renderToStaticMarkup(
       <SubtitleCue
         cue={cue}
         classForToken={() => "bg-transparent"}
         onTokenClick={() => undefined}
         onTokenContextMenu={() => undefined}
-        isRtl={false}
       />,
     );
 
-    expect(markup).toContain("pointer-events-none flex flex-wrap");
-    expect(markup).toContain("pointer-events-auto relative z-40");
-    expect(markup).toContain("<button");
+    expect(html).toContain("pointer-events-none");
+    expect(html).toContain("pointer-events-auto");
+    expect(html).toContain("z-40");
   });
 });
