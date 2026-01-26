@@ -6,6 +6,7 @@ import QuotesPage from "./routes/QuotesPage";
 import SettingsPage from "./routes/SettingsPage";
 import StatsPage from "./routes/StatsPage";
 import VlsubPage from "./routes/VlsubPage";
+import HelpPage from "./routes/HelpPage";
 import { usePrefsStore } from "../state/prefsStore";
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
@@ -69,6 +70,9 @@ export default function App() {
             <NavLink to="/vlsub" className={navLinkClass}>
               Find Subs
             </NavLink>
+            <NavLink to="/help" className={navLinkClass}>
+              ?
+            </NavLink>
           </nav>
         </header>
         <main className="flex-1 rounded-lg border border-white/10 bg-white/5 p-6 shadow-xl backdrop-blur">
@@ -79,6 +83,7 @@ export default function App() {
             <Route path="/stats" element={<StatsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/vlsub" element={<VlsubPage />} />
+            <Route path="/help" element={<HelpPage />} />
             <Route path="*" element={<PlayerPage />} />
           </Routes>
         </main>
