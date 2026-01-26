@@ -1016,14 +1016,14 @@ export default function PlayerPage() {
                 <div className="flex flex-wrap items-center gap-3">
                   <button
                     type="button"
-                    className={`group player-play-button focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 ${isPlaying ? "" : "is-paused"}`}
+                    className={`group play-variant variant-24 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 ${isPlaying ? "" : "is-paused"}`}
                     onClick={() => {
                       togglePlayback();
                       focusPlayerContainer();
                     }}
                     aria-label={isPlaying ? "Pause video" : "Play video"}
                   >
-                    <span className="player-play-icon" aria-hidden />
+                    <span className="play-variant-icon" aria-hidden />
                     <span className="player-tooltip">Space</span>
                   </button>
                   <div className="group relative flex items-center gap-2">
@@ -1121,11 +1121,11 @@ export default function PlayerPage() {
                 </div>
               </div>
               <div className="pointer-events-none absolute inset-0 z-30 flex flex-col justify-start p-6">
-                <div className="pointer-events-auto flex flex-col items-center gap-3">
+                <div className="pointer-events-none flex flex-col items-center gap-3">
                   {activeSecondaryCues.map((cue) => (
                     <div
                       key={`${cue.startMs}-${cue.endMs}`}
-                      className="subtitle-overlay subtitle-overlay-secondary max-w-3xl text-center"
+                      className="subtitle-overlay subtitle-overlay-secondary pointer-events-auto max-w-3xl text-center"
                     >
                       <SubtitleCue
                         cue={cue}
@@ -1160,11 +1160,11 @@ export default function PlayerPage() {
                 </div>
               </div>
               <div className="pointer-events-none absolute inset-0 z-30 flex flex-col justify-end p-6">
-                <div className="pointer-events-auto flex flex-col items-center gap-3">
+                <div className="pointer-events-none flex flex-col items-center gap-3">
                   {activeCues.map((cue) => (
                     <div
                       key={`${cue.startMs}-${cue.endMs}`}
-                      className="subtitle-overlay max-w-3xl text-center"
+                      className="subtitle-overlay pointer-events-auto max-w-3xl text-center"
                     >
                       <SubtitleCue
                         cue={cue}
