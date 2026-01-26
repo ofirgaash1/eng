@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { useDictionaryStore } from "../../state/dictionaryStore";
 import { usePrefsStore } from "../../state/prefsStore";
@@ -17,20 +18,12 @@ import {
   tokenizeWithItalics,
 } from "../../core/subtitles/displayTokens";
 import { handlePlayerKeyDown } from "./playerShortcuts";
+import { formatTimeMs } from "../../utils/timeFormat";
 import { hashBlob } from "../../utils/file";
 import { upsertSubtitleFile } from "../../data/filesRepo";
 import { getCuesForFile, saveCuesForFile } from "../../data/cuesRepo";
 import { getLastSession, saveLastSession } from "../../data/sessionRepo";
 import { parseSrt } from "../../core/parsing/srtParser";
-
-function formatTime(ms: number) {
-  const totalSeconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60)
-    .toString()
-    .padStart(2, "0");
-  const seconds = (totalSeconds % 60).toString().padStart(2, "0");
-  return `${minutes}:${seconds}`;
-}
 
 const RTL_TEXT_RE = /[\u0591-\u07FF\uFB1D-\uFDFD\uFE70-\uFEFC]/;
 const RTL_LEADING_PUNCT_RE = /^[.!?…،؛؟]+$/u;
@@ -65,14 +58,7 @@ type WorkerResponse = {
   error?: string;
 };
 
-function SubtitleCue({
-  cue,
-  onTokenClick,
-  onTokenContextMenu,
-  classForToken,
-  isRtl = false,
-  className,
-}: SubtitleCueProps) {
+function useDisplayTokens(cue: Cue, isRtl: boolean) {
   const tokens = useMemo(() => tokenizeWithItalics(cue.rawText), [cue.rawText]);
   const normalizedTokens = useMemo(() => {
     if (!isRtl) return tokens;
@@ -85,10 +71,18 @@ function SubtitleCue({
     }
     return tokens;
   }, [isRtl, tokens]);
-  const displayTokens = useMemo(
-    () => buildDisplayTokens(normalizedTokens),
-    [normalizedTokens]
-  );
+  return useMemo(() => buildDisplayTokens(normalizedTokens), [normalizedTokens]);
+}
+
+function SubtitleCue({
+  cue,
+  onTokenClick,
+  onTokenContextMenu,
+  classForToken,
+  isRtl = false,
+  className,
+}: SubtitleCueProps) {
+  const displayTokens = useDisplayTokens(cue, isRtl);
   return (
     <div className={`flex flex-wrap ${className ?? ""}`} dir={isRtl ? "rtl" : "ltr"}>
       {displayTokens.map((displayToken, index) => {
@@ -130,6 +124,31 @@ function SubtitleCue({
   );
 }
 
+function SubtitleCueBackground({
+  cue,
+  isRtl = false,
+  className,
+}: Pick<SubtitleCueProps, "cue" | "isRtl" | "className">) {
+  const displayTokens = useDisplayTokens(cue, isRtl);
+  return (
+    <div className={`flex flex-wrap ${className ?? ""}`} dir={isRtl ? "rtl" : "ltr"}>
+      {displayTokens.map((displayToken, index) => {
+        const prevToken = index > 0 ? displayTokens[index - 1].token : undefined;
+        const token = displayToken.token;
+        const spacingClass = shouldAddSpaceBefore(prevToken, token) ? "ms-1" : "";
+        return (
+          <span
+            key={`${displayToken.text}-${index}`}
+            className={`rounded px-1 py-0.5 ${spacingClass}`}
+          >
+            {displayToken.text}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function PlayerPage() {
   const playerContainerRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -156,6 +175,12 @@ export default function PlayerPage() {
   const [secondarySubtitleEnabled, setSecondarySubtitleEnabled] = useState<boolean>(false);
   const [isSecondarySubtitleRtl, setIsSecondarySubtitleRtl] = useState<boolean>(false);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const [volume, setVolume] = useState<number>(1);
+  const [durationMs, setDurationMs] = useState<number | null>(null);
+  const [showControls, setShowControls] = useState<boolean>(true);
+  const hideControlsTimeoutRef = useRef<number | null>(null);
   const lastVideoTimeSavedRef = useRef<number>(0);
   const addWord = useDictionaryStore((state) => state.addUnknownWordFromToken);
   const classForToken = useDictionaryStore((state) => state.classForToken);
@@ -230,6 +255,37 @@ export default function PlayerPage() {
     document.addEventListener("fullscreenchange", handleFullscreenChange);
     return () => {
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const syncPlaybackState = () => setIsPlaying(!video.paused);
+    const syncMutedState = () => setIsMuted(video.muted);
+    const syncVolumeState = () => setVolume(video.volume);
+    const syncDuration = () => {
+      setDurationMs(Number.isFinite(video.duration) ? video.duration * 1000 : null);
+    };
+
+    syncPlaybackState();
+    syncMutedState();
+    syncVolumeState();
+    syncDuration();
+
+    video.addEventListener("play", syncPlaybackState);
+    video.addEventListener("pause", syncPlaybackState);
+    video.addEventListener("volumechange", syncMutedState);
+    video.addEventListener("volumechange", syncVolumeState);
+    video.addEventListener("loadedmetadata", syncDuration);
+    video.addEventListener("durationchange", syncDuration);
+    return () => {
+      video.removeEventListener("play", syncPlaybackState);
+      video.removeEventListener("pause", syncPlaybackState);
+      video.removeEventListener("volumechange", syncMutedState);
+      video.removeEventListener("volumechange", syncVolumeState);
+      video.removeEventListener("loadedmetadata", syncDuration);
+      video.removeEventListener("durationchange", syncDuration);
     };
   }, []);
 
@@ -554,14 +610,43 @@ export default function PlayerPage() {
     }
   }, []);
 
+  const toggleMute = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.muted = !video.muted;
+  }, []);
+
   const seekBy = useCallback((deltaSeconds: number) => {
     const video = videoRef.current;
     if (!video) return;
+    if (video.readyState === 0) return;
     const nextTime = Math.min(
       Math.max(video.currentTime + deltaSeconds, 0),
-      Number.isFinite(video.duration) ? video.duration : Number.MAX_SAFE_INTEGER,
+      Number.isFinite(video.duration) ? video.duration : Number.POSITIVE_INFINITY,
     );
     video.currentTime = nextTime;
+  }, []);
+
+  const handleTimelineChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.readyState === 0) return;
+    const nextTimeSeconds = Number(event.target.value);
+    if (!Number.isFinite(nextTimeSeconds)) return;
+    video.currentTime = nextTimeSeconds;
+    setCurrentTimeMs(nextTimeSeconds * 1000);
+  }, []);
+
+  const handleVolumeChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const video = videoRef.current;
+    if (!video) return;
+    const nextVolume = Number(event.target.value);
+    if (!Number.isFinite(nextVolume)) return;
+    video.volume = nextVolume;
+    if (nextVolume > 0) {
+      video.muted = false;
+    }
+    setVolume(nextVolume);
   }, []);
 
   const processSubtitleFile = useCallback(
@@ -770,6 +855,16 @@ export default function PlayerPage() {
     [secondaryCues, currentTimeMs, secondarySubtitleOffsetMs],
   );
 
+  const formattedCurrentTime = useMemo(() => formatTimeMs(currentTimeMs), [currentTimeMs]);
+  const formattedDuration = useMemo(
+    () => (durationMs ? formatTimeMs(durationMs) : "--:--"),
+    [durationMs],
+  );
+  const progressPercent = useMemo(() => {
+    if (!durationMs) return 0;
+    return Math.min(100, Math.max(0, (currentTimeMs / durationMs) * 100));
+  }, [currentTimeMs, durationMs]);
+
   const adjustSubtitleOffset = useCallback((deltaMs: number) => {
     setSubtitleOffsetMs((previous) => previous + deltaMs);
   }, []);
@@ -791,96 +886,299 @@ export default function PlayerPage() {
     });
   }, [secondaryCues.length]);
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
+  const focusPlayerContainer = useCallback(() => {
+    playerContainerRef.current?.focus();
+  }, []);
+
+  const clearHideControlsTimeout = useCallback(() => {
+    if (hideControlsTimeoutRef.current !== null) {
+      window.clearTimeout(hideControlsTimeoutRef.current);
+      hideControlsTimeoutRef.current = null;
+    }
+  }, []);
+
+  const scheduleHideControls = useCallback(() => {
+    clearHideControlsTimeout();
+    if (!isPlaying) return;
+    hideControlsTimeoutRef.current = window.setTimeout(() => {
+      setShowControls(false);
+    }, 2500);
+  }, [clearHideControlsTimeout, isPlaying]);
+
+  const showControlsNow = useCallback(() => {
+    setShowControls(true);
+    scheduleHideControls();
+  }, [scheduleHideControls]);
+
+  const handleShortcutKeyDown = useCallback(
+    (event: KeyboardEvent) =>
       handlePlayerKeyDown(event, {
         video: videoRef.current,
         seekBy,
         toggleFullscreen,
+        toggleMute,
         togglePlayback,
         toggleSecondarySubtitle,
-      });
-    };
+      }),
+    [seekBy, toggleFullscreen, toggleMute, togglePlayback, toggleSecondarySubtitle],
+  );
 
-    window.addEventListener("keydown", handleKeyDown);
+  const handleShortcutKeyDownCapture = useCallback(
+    (event: ReactKeyboardEvent<HTMLElement>) => {
+      const handled = handleShortcutKeyDown(event.nativeEvent);
+      if (handled) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    },
+    [handleShortcutKeyDown],
+  );
+
+  useEffect(() => {
+    document.addEventListener("keydown", handleShortcutKeyDown, true);
     return () => {
-      window.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("keydown", handleShortcutKeyDown, true);
     };
-  }, [seekBy, toggleFullscreen, togglePlayback, toggleSecondarySubtitle]);
+  }, [handleShortcutKeyDown]);
+
+  useEffect(() => {
+    if (!isPlaying) {
+      clearHideControlsTimeout();
+      setShowControls(true);
+      return;
+    }
+    scheduleHideControls();
+  }, [clearHideControlsTimeout, isPlaying, scheduleHideControls]);
+
+  useEffect(() => {
+    return () => {
+      clearHideControlsTimeout();
+    };
+  }, [clearHideControlsTimeout]);
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[2fr,1fr]">
+    <div className="grid gap-6 lg:grid-cols-[2fr,1fr]" onKeyDown={handleShortcutKeyDownCapture}>
       <section className="space-y-4">
         <div
           ref={playerContainerRef}
           className="relative aspect-video overflow-hidden rounded-lg bg-black shadow-xl"
           onDoubleClick={toggleFullscreen}
+          onMouseMove={showControlsNow}
+          onMouseLeave={() => {
+            if (isPlaying) {
+              setShowControls(false);
+            }
+          }}
+          onFocusCapture={showControlsNow}
+          tabIndex={-1}
         >
-          <button
-            type="button"
-            className="absolute right-3 top-3 z-10 rounded bg-black/70 px-3 py-1 text-xs font-medium text-white transition hover:bg-black/80 focus:outline-none focus-visible:outline-none"
-            onClick={(event) => {
-              event.stopPropagation();
-              toggleFullscreen();
-              if (event.currentTarget instanceof HTMLElement) {
-                event.currentTarget.blur();
-              }
-            }}
-          >
-            {isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
-          </button>
           <video
             ref={videoRef}
             className="h-full w-full focus:outline-none focus-visible:outline-none"
-            controls
-            controlsList="nofullscreen"
+            onClick={() => {
+              togglePlayback();
+              focusPlayerContainer();
+            }}
             onTimeUpdate={handleTimeUpdate}
             src={videoUrl ?? undefined}
             tabIndex={-1}
           >
             <track kind="subtitles" srcLang="en" label={subtitleName || "Subtitles"} />
           </video>
-          {secondarySubtitleEnabled && activeSecondaryCues.length > 0 && (
-            <div className="pointer-events-none absolute inset-0 flex flex-col justify-start p-6">
-              <div className="pointer-events-auto flex flex-col items-center gap-3">
-                {activeSecondaryCues.map((cue) => (
-                  <div
-                    key={`${cue.startMs}-${cue.endMs}`}
-                    className="subtitle-overlay subtitle-overlay-secondary max-w-3xl text-center"
+          <div
+            className={`absolute inset-x-0 bottom-0 z-20 flex flex-col gap-3 bg-gradient-to-t from-black/80 via-black/40 to-transparent px-4 pb-4 pt-6 text-white transition-opacity duration-300 ${
+              showControls ? "opacity-100" : "pointer-events-none opacity-0"
+            }`}
+            onDoubleClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex flex-col gap-2">
+              <input
+                type="range"
+                min={0}
+                max={durationMs ? Math.max(durationMs / 1000, 0) : 0}
+                step={0.1}
+                value={durationMs ? Math.min(currentTimeMs / 1000, durationMs / 1000) : 0}
+                onChange={handleTimelineChange}
+                onKeyDown={handleShortcutKeyDownCapture}
+                onFocus={(event) => {
+                  event.currentTarget.blur();
+                  focusPlayerContainer();
+                }}
+                className="player-timeline w-full cursor-pointer"
+                aria-label="Seek position"
+                disabled={!durationMs}
+                tabIndex={-1}
+                style={{
+                  ["--timeline-gradient" as string]: `linear-gradient(90deg, rgba(56, 189, 248, 0.6) 0%, rgba(56, 189, 248, 0.6) ${progressPercent}%, rgba(148, 163, 184, 0.35) ${progressPercent}%, rgba(148, 163, 184, 0.35) 100%)`,
+                }}
+              />
+              <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    className={`group player-play-button focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 ${isPlaying ? "" : "is-paused"}`}
+                    onClick={() => {
+                      togglePlayback();
+                      focusPlayerContainer();
+                    }}
+                    aria-label={isPlaying ? "Pause video" : "Play video"}
                   >
-                    <SubtitleCue
-                      cue={cue}
-                      classForToken={classForToken}
-                      onTokenClick={handleTokenClick}
-                      onTokenContextMenu={handleTokenContextMenu}
-                      isRtl={isSecondarySubtitleRtl}
-                      className="justify-center text-center"
-                    />
+                    <span className="player-play-icon" aria-hidden />
+                    <span className="player-tooltip">Space</span>
+                  </button>
+                  <div className="group relative flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="player-icon-button text-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                      onClick={() => {
+                        toggleMute();
+                        focusPlayerContainer();
+                      }}
+                      aria-label={isMuted ? "Unmute video" : "Mute video"}
+                    >
+                      <span aria-hidden>{isMuted ? "🔇" : "🔊"}</span>
+                      <span className="player-tooltip">M</span>
+                    </button>
+                    <div className="max-w-0 overflow-hidden transition-all duration-300 group-hover:max-w-[120px]">
+                      <input
+                        id="player-volume"
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={isMuted ? 0 : volume}
+                        onChange={handleVolumeChange}
+                        onKeyDown={handleShortcutKeyDownCapture}
+                        className="player-volume w-24 cursor-pointer"
+                        aria-label="Volume"
+                      />
+                    </div>
                   </div>
-                ))}
+                </div>
+                <div
+                  className="flex items-center gap-3 text-xs text-white/70"
+                  style={{ fontFamily: '"Comic Sans MS", "Comic Sans", cursive' }}
+                >
+                  {formattedCurrentTime} / {formattedDuration}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex flex-row-reverse items-center gap-2">
+                    <button
+                      type="button"
+                      className="group player-icon-button text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                      onClick={() => {
+                        toggleFullscreen();
+                        focusPlayerContainer();
+                      }}
+                      aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+                    >
+                      <span aria-hidden>⛶</span>
+                      <span className="player-tooltip">F</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="group player-pill-button text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                      onClick={() => {
+                        seekBy(-5);
+                        focusPlayerContainer();
+                      }}
+                      aria-label="Seek backward 5 seconds"
+                    >
+                      -5s <span className="player-tooltip">←</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="group player-pill-button text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                      onClick={() => {
+                        seekBy(5);
+                        focusPlayerContainer();
+                      }}
+                      aria-label="Seek forward 5 seconds"
+                    >
+                      +5s <span className="player-tooltip">→</span>
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
+          </div>
+          {secondarySubtitleEnabled && activeSecondaryCues.length > 0 && (
+            <>
+              <div className="pointer-events-none absolute inset-0 z-[2] flex flex-col justify-start p-6">
+                <div className="pointer-events-none flex flex-col items-center gap-3">
+                  {activeSecondaryCues.map((cue) => (
+                    <div
+                      key={`${cue.startMs}-${cue.endMs}-bg`}
+                      className="subtitle-overlay subtitle-overlay-secondary subtitle-overlay-bg max-w-3xl text-center"
+                    >
+                      <SubtitleCueBackground
+                        cue={cue}
+                        isRtl={isSecondarySubtitleRtl}
+                        className="justify-center text-center"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="pointer-events-none absolute inset-0 z-30 flex flex-col justify-start p-6">
+                <div className="pointer-events-auto flex flex-col items-center gap-3">
+                  {activeSecondaryCues.map((cue) => (
+                    <div
+                      key={`${cue.startMs}-${cue.endMs}`}
+                      className="subtitle-overlay subtitle-overlay-secondary max-w-3xl text-center"
+                    >
+                      <SubtitleCue
+                        cue={cue}
+                        classForToken={classForToken}
+                        onTokenClick={handleTokenClick}
+                        onTokenContextMenu={handleTokenContextMenu}
+                        isRtl={isSecondarySubtitleRtl}
+                        className="justify-center text-center"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
           )}
           {activeCues.length > 0 && (
-            <div className="pointer-events-none absolute inset-0 flex flex-col justify-end p-6">
-              <div className="pointer-events-auto flex flex-col items-center gap-3">
-                {activeCues.map((cue) => (
-                  <div
-                    key={`${cue.startMs}-${cue.endMs}`}
-                    className="subtitle-overlay max-w-3xl text-center"
-                  >
-                    <SubtitleCue
-                      cue={cue}
-                      classForToken={classForToken}
-                      onTokenClick={handleTokenClick}
-                      onTokenContextMenu={handleTokenContextMenu}
-                      isRtl={isSubtitleRtl}
-                      className="justify-center text-center"
-                    />
-                  </div>
-                ))}
+            <>
+              <div className="pointer-events-none absolute inset-0 z-[2] flex flex-col justify-end p-6">
+                <div className="pointer-events-none flex flex-col items-center gap-3">
+                  {activeCues.map((cue) => (
+                    <div
+                      key={`${cue.startMs}-${cue.endMs}-bg`}
+                      className="subtitle-overlay subtitle-overlay-bg max-w-3xl text-center"
+                    >
+                      <SubtitleCueBackground
+                        cue={cue}
+                        isRtl={isSubtitleRtl}
+                        className="justify-center text-center"
+                      />
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
+              <div className="pointer-events-none absolute inset-0 z-30 flex flex-col justify-end p-6">
+                <div className="pointer-events-auto flex flex-col items-center gap-3">
+                  {activeCues.map((cue) => (
+                    <div
+                      key={`${cue.startMs}-${cue.endMs}`}
+                      className="subtitle-overlay max-w-3xl text-center"
+                    >
+                      <SubtitleCue
+                        cue={cue}
+                        classForToken={classForToken}
+                        onTokenClick={handleTokenClick}
+                        onTokenContextMenu={handleTokenContextMenu}
+                        isRtl={isSubtitleRtl}
+                        className="justify-center text-center"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
           )}
         </div>
         <div className="flex flex-wrap items-center gap-3 rounded-lg bg-white/5 p-3 text-sm text-white/80">
@@ -889,11 +1187,9 @@ export default function PlayerPage() {
             <button
               type="button"
               className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:outline-none"
-              onClick={(event) => {
+              onClick={() => {
                 adjustSubtitleOffset(-500);
-                if (event.currentTarget instanceof HTMLElement) {
-                  event.currentTarget.blur();
-                }
+                focusPlayerContainer();
               }}
             >
               –0.5s
@@ -901,11 +1197,9 @@ export default function PlayerPage() {
             <button
               type="button"
               className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:outline-none"
-              onClick={(event) => {
+              onClick={() => {
                 adjustSubtitleOffset(500);
-                if (event.currentTarget instanceof HTMLElement) {
-                  event.currentTarget.blur();
-                }
+                focusPlayerContainer();
               }}
             >
               +0.5s
@@ -957,11 +1251,9 @@ export default function PlayerPage() {
               <button
                 type="button"
                 className="rounded bg-white/10 px-2 py-1 text-xs font-medium text-white transition hover:bg-white/20 focus:outline-none focus-visible:outline-none"
-                onClick={(event) => {
+                onClick={() => {
                   toggleSecondarySubtitle();
-                  if (event.currentTarget instanceof HTMLElement) {
-                    event.currentTarget.blur();
-                  }
+                  focusPlayerContainer();
                 }}
                 disabled={secondaryCues.length === 0}
               >
@@ -1004,11 +1296,9 @@ export default function PlayerPage() {
                 <button
                   type="button"
                   className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:outline-none"
-                  onClick={(event) => {
+                  onClick={() => {
                     adjustSecondarySubtitleOffset(-500);
-                    if (event.currentTarget instanceof HTMLElement) {
-                      event.currentTarget.blur();
-                    }
+                    focusPlayerContainer();
                   }}
                 >
                   –0.5s
@@ -1016,11 +1306,9 @@ export default function PlayerPage() {
                 <button
                   type="button"
                   className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:outline-none"
-                  onClick={(event) => {
+                  onClick={() => {
                     adjustSecondarySubtitleOffset(500);
-                    if (event.currentTarget instanceof HTMLElement) {
-                      event.currentTarget.blur();
-                    }
+                    focusPlayerContainer();
                   }}
                 >
                   +0.5s
@@ -1044,7 +1332,7 @@ export default function PlayerPage() {
               {activeCues.map((cue) => (
                 <div key={`${cue.startMs}-${cue.endMs}`} className="space-y-2">
                   <div className="text-white/60">
-                    {formatTime(Math.max(0, cue.startMs + subtitleOffsetMs))} – {formatTime(
+                    {formatTimeMs(Math.max(0, cue.startMs + subtitleOffsetMs))} – {formatTimeMs(
                       Math.max(0, cue.endMs + subtitleOffsetMs),
                     )}
                   </div>
