@@ -96,7 +96,7 @@ function SubtitleCue({
           <button
             key={`${displayToken.text}-${index}`}
             type="button"
-            className={`pointer-events-auto rounded px-0.5 text-left ${spacingClass} ${
+            className={`pointer-events-auto relative z-40 rounded px-0.5 text-left ${spacingClass} ${
               token.isWord ? "focus:outline-none focus-visible:outline-none" : "cursor-default"
             }`}
             onClick={(event) => {
