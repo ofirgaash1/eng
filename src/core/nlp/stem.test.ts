@@ -14,4 +14,21 @@ describe("stem", () => {
     expect(stem("meticulousness")).toBe("meticulousness");
     expect(stem("thready")).toBe("thready");
   });
+
+  it("covers supported english suffix endings", () => {
+    const cases: Array<[string, string]> = [
+      ["cities", "city"],
+      ["running", "runn"],
+      ["boggled", "boggl"],
+      ["quickly", "quick"],
+      ["churches", "churche"],
+      ["tractors", "tractor"],
+      ["goddess", "goddess"],
+      ["kindness", "kindness"],
+    ];
+
+    cases.forEach(([input, expected]) => {
+      expect(stem(input)).toBe(expected);
+    });
+  });
 });
