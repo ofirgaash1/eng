@@ -2,11 +2,12 @@ type PlayerShortcutHandlers = {
   video: HTMLVideoElement | null;
   seekBy: (seconds: number) => void;
   toggleFullscreen: () => void;
+  toggleMute: () => void;
   togglePlayback: () => void;
   toggleSecondarySubtitle: () => void;
 };
 
-const INTERACTIVE_TAGS = ["INPUT", "TEXTAREA", "SELECT", "BUTTON"];
+const INTERACTIVE_TAGS = ["INPUT", "TEXTAREA", "SELECT"];
 
 function shouldIgnoreTarget(target: EventTarget | null): boolean {
   if (typeof HTMLElement === "undefined") return false;
@@ -15,60 +16,62 @@ function shouldIgnoreTarget(target: EventTarget | null): boolean {
   return INTERACTIVE_TAGS.includes(target.tagName);
 }
 
-function blurActiveElement(video: HTMLVideoElement | null) {
-  if (typeof document === "undefined") return;
-  const activeElement = document.activeElement as HTMLElement | null;
-  if (!activeElement) return;
-  if (activeElement === video) {
-    video?.blur();
-    return;
-  }
-  if (activeElement instanceof HTMLElement) {
-    if (activeElement.tagName === "BUTTON") {
-      activeElement.blur();
-      return;
-    }
-    if (video && video.contains(activeElement)) {
-      video.blur();
-    }
+function stopShortcutEvent(event: KeyboardEvent) {
+  event.preventDefault();
+  event.stopPropagation();
+  if (typeof event.stopImmediatePropagation === "function") {
+    event.stopImmediatePropagation();
   }
 }
 
-export function handlePlayerKeyDown(event: KeyboardEvent, handlers: PlayerShortcutHandlers) {
-  const { video, seekBy, toggleFullscreen, togglePlayback, toggleSecondarySubtitle } = handlers;
-  if (!video) return;
-  if (shouldIgnoreTarget(event.target)) return;
-
-  blurActiveElement(video);
+export function handlePlayerKeyDown(
+  event: KeyboardEvent,
+  handlers: PlayerShortcutHandlers,
+): boolean {
+  const { video, seekBy, toggleFullscreen, toggleMute, togglePlayback, toggleSecondarySubtitle } =
+    handlers;
+  if (!video) return false;
+  if (shouldIgnoreTarget(event.target)) return false;
+  if (event.altKey || event.ctrlKey || event.metaKey) return false;
 
   const code = event.code;
   switch (code) {
     case "Space": {
-      event.preventDefault();
+      stopShortcutEvent(event);
       togglePlayback();
-      break;
+      return true;
+    }
+    case "KeyK": {
+      stopShortcutEvent(event);
+      togglePlayback();
+      return true;
     }
     case "ArrowLeft": {
-      event.preventDefault();
+      stopShortcutEvent(event);
       seekBy(-5);
-      break;
+      return true;
     }
     case "ArrowRight": {
-      event.preventDefault();
+      stopShortcutEvent(event);
       seekBy(5);
-      break;
+      return true;
     }
     case "KeyF": {
-      event.preventDefault();
+      stopShortcutEvent(event);
       toggleFullscreen();
-      break;
+      return true;
+    }
+    case "KeyM": {
+      stopShortcutEvent(event);
+      toggleMute();
+      return true;
     }
     case "KeyH": {
-      event.preventDefault();
+      stopShortcutEvent(event);
       toggleSecondarySubtitle();
-      break;
+      return true;
     }
     default:
-      break;
+      return false;
   }
 }
