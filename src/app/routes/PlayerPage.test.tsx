@@ -23,6 +23,6 @@ describe("SubtitleCue", () => {
 
     expect(html).toContain("pointer-events-none");
     expect(html).toContain("pointer-events-auto");
-    expect(html).toContain("z-40");
+    expect(html).toContain("z-50");
   });
 });
