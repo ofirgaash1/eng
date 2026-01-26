@@ -6,7 +6,12 @@ function createEvent(code: string, key = "") {
     code,
     key,
     target: null,
+    altKey: false,
+    ctrlKey: false,
+    metaKey: false,
     preventDefault: vi.fn(),
+    stopPropagation: vi.fn(),
+    stopImmediatePropagation: vi.fn(),
   } as unknown as KeyboardEvent;
 }
 
@@ -23,24 +28,29 @@ describe("handlePlayerKeyDown", () => {
       isPlaying = !isPlaying;
     });
     const toggleFullscreen = vi.fn();
+    const toggleMute = vi.fn();
     const toggleSecondarySubtitle = vi.fn();
     const seekBy = vi.fn((delta: number) => {
       video.currentTime += delta;
     });
 
-    handlePlayerKeyDown(createEvent("Space", " "), {
-      video,
-      seekBy,
-      toggleFullscreen,
-      togglePlayback,
-      toggleSecondarySubtitle,
-    });
+    expect(
+      handlePlayerKeyDown(createEvent("Space", " "), {
+        video,
+        seekBy,
+        toggleFullscreen,
+        toggleMute,
+        togglePlayback,
+        toggleSecondarySubtitle,
+      }),
+    ).toBe(true);
     expect(isPlaying).toBe(true);
 
     handlePlayerKeyDown(createEvent("ArrowRight"), {
       video,
       seekBy,
       toggleFullscreen,
+      toggleMute,
       togglePlayback,
       toggleSecondarySubtitle,
     });
@@ -51,6 +61,7 @@ describe("handlePlayerKeyDown", () => {
       video,
       seekBy,
       toggleFullscreen,
+      toggleMute,
       togglePlayback,
       toggleSecondarySubtitle,
     });
@@ -60,6 +71,7 @@ describe("handlePlayerKeyDown", () => {
       video,
       seekBy,
       toggleFullscreen,
+      toggleMute,
       togglePlayback,
       toggleSecondarySubtitle,
     });

@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { useDictionaryStore } from "../../state/dictionaryStore";
 import { usePrefsStore } from "../../state/prefsStore";
@@ -554,12 +555,19 @@ export default function PlayerPage() {
     }
   }, []);
 
+  const toggleMute = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.muted = !video.muted;
+  }, []);
+
   const seekBy = useCallback((deltaSeconds: number) => {
     const video = videoRef.current;
     if (!video) return;
+    if (video.readyState === 0) return;
     const nextTime = Math.min(
       Math.max(video.currentTime + deltaSeconds, 0),
-      Number.isFinite(video.duration) ? video.duration : Number.MAX_SAFE_INTEGER,
+      Number.isFinite(video.duration) ? video.duration : Number.POSITIVE_INFINITY,
     );
     video.currentTime = nextTime;
   }, []);
@@ -791,30 +799,49 @@ export default function PlayerPage() {
     });
   }, [secondaryCues.length]);
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
+  const focusPlayerContainer = useCallback(() => {
+    playerContainerRef.current?.focus();
+  }, []);
+
+  const handleShortcutKeyDown = useCallback(
+    (event: KeyboardEvent) =>
       handlePlayerKeyDown(event, {
         video: videoRef.current,
         seekBy,
         toggleFullscreen,
+        toggleMute,
         togglePlayback,
         toggleSecondarySubtitle,
-      });
-    };
+      }),
+    [seekBy, toggleFullscreen, toggleMute, togglePlayback, toggleSecondarySubtitle],
+  );
 
-    window.addEventListener("keydown", handleKeyDown);
+  const handleShortcutKeyDownCapture = useCallback(
+    (event: ReactKeyboardEvent<HTMLElement>) => {
+      const handled = handleShortcutKeyDown(event.nativeEvent);
+      if (handled) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    },
+    [handleShortcutKeyDown],
+  );
+
+  useEffect(() => {
+    window.addEventListener("keydown", handleShortcutKeyDown, { capture: true });
     return () => {
-      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keydown", handleShortcutKeyDown, { capture: true });
     };
-  }, [seekBy, toggleFullscreen, togglePlayback, toggleSecondarySubtitle]);
+  }, [handleShortcutKeyDown]);
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[2fr,1fr]">
+    <div className="grid gap-6 lg:grid-cols-[2fr,1fr]" onKeyDown={handleShortcutKeyDownCapture}>
       <section className="space-y-4">
         <div
           ref={playerContainerRef}
           className="relative aspect-video overflow-hidden rounded-lg bg-black shadow-xl"
           onDoubleClick={toggleFullscreen}
+          tabIndex={-1}
         >
           <button
             type="button"
@@ -822,9 +849,7 @@ export default function PlayerPage() {
             onClick={(event) => {
               event.stopPropagation();
               toggleFullscreen();
-              if (event.currentTarget instanceof HTMLElement) {
-                event.currentTarget.blur();
-              }
+              focusPlayerContainer();
             }}
           >
             {isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
@@ -891,9 +916,7 @@ export default function PlayerPage() {
               className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:outline-none"
               onClick={(event) => {
                 adjustSubtitleOffset(-500);
-                if (event.currentTarget instanceof HTMLElement) {
-                  event.currentTarget.blur();
-                }
+                focusPlayerContainer();
               }}
             >
               –0.5s
@@ -903,9 +926,7 @@ export default function PlayerPage() {
               className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:outline-none"
               onClick={(event) => {
                 adjustSubtitleOffset(500);
-                if (event.currentTarget instanceof HTMLElement) {
-                  event.currentTarget.blur();
-                }
+                focusPlayerContainer();
               }}
             >
               +0.5s
@@ -959,9 +980,7 @@ export default function PlayerPage() {
                 className="rounded bg-white/10 px-2 py-1 text-xs font-medium text-white transition hover:bg-white/20 focus:outline-none focus-visible:outline-none"
                 onClick={(event) => {
                   toggleSecondarySubtitle();
-                  if (event.currentTarget instanceof HTMLElement) {
-                    event.currentTarget.blur();
-                  }
+                  focusPlayerContainer();
                 }}
                 disabled={secondaryCues.length === 0}
               >
@@ -1006,9 +1025,7 @@ export default function PlayerPage() {
                   className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:outline-none"
                   onClick={(event) => {
                     adjustSecondarySubtitleOffset(-500);
-                    if (event.currentTarget instanceof HTMLElement) {
-                      event.currentTarget.blur();
-                    }
+                    focusPlayerContainer();
                   }}
                 >
                   –0.5s
@@ -1018,9 +1035,7 @@ export default function PlayerPage() {
                   className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:outline-none"
                   onClick={(event) => {
                     adjustSecondarySubtitleOffset(500);
-                    if (event.currentTarget instanceof HTMLElement) {
-                      event.currentTarget.blur();
-                    }
+                    focusPlayerContainer();
                   }}
                 >
                   +0.5s
