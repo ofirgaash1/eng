@@ -1128,7 +1128,7 @@ export default function PlayerPage() {
                   {activeSecondaryCues.map((cue) => (
                     <div
                       key={`${cue.startMs}-${cue.endMs}`}
-                      className="subtitle-overlay subtitle-overlay-secondary pointer-events-none max-w-3xl text-center"
+                      className="subtitle-overlay subtitle-overlay-secondary max-w-3xl text-center"
                     >
                       <SubtitleCue
                         cue={cue}
@@ -1167,7 +1167,7 @@ export default function PlayerPage() {
                   {activeCues.map((cue) => (
                     <div
                       key={`${cue.startMs}-${cue.endMs}`}
-                      className="subtitle-overlay pointer-events-none max-w-3xl text-center"
+                      className="subtitle-overlay max-w-3xl text-center"
                     >
                       <SubtitleCue
                         cue={cue}
