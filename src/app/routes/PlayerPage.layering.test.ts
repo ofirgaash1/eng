@@ -8,8 +8,8 @@ describe("PlayerPage subtitle layering", () => {
     const contents = await readFile(filePath, "utf-8");
 
     expect(contents).toContain("pointer-events-none flex flex-wrap");
-    expect(contents).toContain("pointer-events-auto relative z-40");
-    expect(contents).toContain("absolute inset-0 z-30");
+    expect(contents).toContain("pointer-events-auto relative z-50");
+    expect(contents).toContain("absolute inset-0 z-40");
     expect(contents).toContain("z-20");
   });
 });
