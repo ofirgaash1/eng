@@ -828,11 +828,38 @@ export default function PlayerPage() {
   );
 
   useEffect(() => {
-    window.addEventListener("keydown", handleShortcutKeyDown, { capture: true });
+    const onKeyDownCapture = (event: KeyboardEvent) => {
+      console.log("[kbd]", {
+        code: event.code,
+        key: event.key,
+        target: (event.target as HTMLElement | null)?.tagName,
+        active: (document.activeElement as HTMLElement | null)?.tagName,
+        defaultPrevented: event.defaultPrevented,
+      });
+      const handled = handleShortcutKeyDown(event);
+      if (handled) {
+        console.log("[kbd] handled");
+      }
+    };
+
+    console.log("SHORTCUTS VERSION", "debug-2024-09-15-1");
+    document.addEventListener("keydown", onKeyDownCapture, true);
     return () => {
-      window.removeEventListener("keydown", handleShortcutKeyDown, { capture: true });
+      document.removeEventListener("keydown", onKeyDownCapture, true);
     };
   }, [handleShortcutKeyDown]);
+
+  useEffect(() => {
+    const container = playerContainerRef.current;
+    if (!container) return;
+    const onPointerDownCapture = () => {
+      requestAnimationFrame(() => container.focus());
+    };
+    container.addEventListener("pointerdown", onPointerDownCapture, true);
+    return () => {
+      container.removeEventListener("pointerdown", onPointerDownCapture, true);
+    };
+  }, []);
 
   return (
     <div className="grid gap-6 lg:grid-cols-[2fr,1fr]" onKeyDown={handleShortcutKeyDownCapture}>

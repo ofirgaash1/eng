@@ -24,6 +24,10 @@ function stopShortcutEvent(event: KeyboardEvent) {
   }
 }
 
+function matchesShortcut(event: KeyboardEvent, codes: string[], keys: string[]): boolean {
+  return codes.includes(event.code) || keys.includes(event.key);
+}
+
 export function handlePlayerKeyDown(
   event: KeyboardEvent,
   handlers: PlayerShortcutHandlers,
@@ -34,44 +38,40 @@ export function handlePlayerKeyDown(
   if (shouldIgnoreTarget(event.target)) return false;
   if (event.altKey || event.ctrlKey || event.metaKey) return false;
 
-  const code = event.code;
-  switch (code) {
-    case "Space": {
-      stopShortcutEvent(event);
-      togglePlayback();
-      return true;
-    }
-    case "KeyK": {
-      stopShortcutEvent(event);
-      togglePlayback();
-      return true;
-    }
-    case "ArrowLeft": {
-      stopShortcutEvent(event);
-      seekBy(-5);
-      return true;
-    }
-    case "ArrowRight": {
-      stopShortcutEvent(event);
-      seekBy(5);
-      return true;
-    }
-    case "KeyF": {
-      stopShortcutEvent(event);
-      toggleFullscreen();
-      return true;
-    }
-    case "KeyM": {
-      stopShortcutEvent(event);
-      toggleMute();
-      return true;
-    }
-    case "KeyH": {
-      stopShortcutEvent(event);
-      toggleSecondarySubtitle();
-      return true;
-    }
-    default:
-      return false;
+  if (matchesShortcut(event, ["Space"], [" ", "Spacebar"])) {
+    stopShortcutEvent(event);
+    togglePlayback();
+    return true;
   }
+  if (matchesShortcut(event, ["KeyK"], ["k", "K"])) {
+    stopShortcutEvent(event);
+    togglePlayback();
+    return true;
+  }
+  if (matchesShortcut(event, ["ArrowLeft"], ["ArrowLeft"])) {
+    stopShortcutEvent(event);
+    seekBy(-5);
+    return true;
+  }
+  if (matchesShortcut(event, ["ArrowRight"], ["ArrowRight"])) {
+    stopShortcutEvent(event);
+    seekBy(5);
+    return true;
+  }
+  if (matchesShortcut(event, ["KeyF"], ["f", "F"])) {
+    stopShortcutEvent(event);
+    toggleFullscreen();
+    return true;
+  }
+  if (matchesShortcut(event, ["KeyM"], ["m", "M"])) {
+    stopShortcutEvent(event);
+    toggleMute();
+    return true;
+  }
+  if (matchesShortcut(event, ["KeyH"], ["h", "H"])) {
+    stopShortcutEvent(event);
+    toggleSecondarySubtitle();
+    return true;
+  }
+  return false;
 }

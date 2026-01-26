@@ -77,4 +77,24 @@ describe("handlePlayerKeyDown", () => {
     });
     expect(toggleSecondarySubtitle).toHaveBeenCalled();
   });
+
+  it("falls back to key values when code is missing", () => {
+    const video = {
+      currentTime: 0,
+      blur: vi.fn(),
+      contains: vi.fn().mockReturnValue(false),
+    } as unknown as HTMLVideoElement;
+
+    const event = createEvent("", " ");
+    const handled = handlePlayerKeyDown(event, {
+      video,
+      seekBy: vi.fn(),
+      toggleFullscreen: vi.fn(),
+      toggleMute: vi.fn(),
+      togglePlayback: vi.fn(),
+      toggleSecondarySubtitle: vi.fn(),
+    });
+
+    expect(handled).toBe(true);
+  });
 });
