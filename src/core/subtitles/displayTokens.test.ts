@@ -55,6 +55,11 @@ describe("subtitle display tokens", () => {
     expect(firstTokens.some((token) => /[\u0001\u0002]/.test(token.text))).toBe(false);
     expect(firstTokens.slice(0, 3).every((token) => token.italic)).toBe(false);
     expect(firstTokens.slice(3).every((token) => token.italic)).toBe(true);
+    expect(firstTokens.filter((token) => token.italic).map((token) => token.text)).toEqual([
+      "Who",
+      "are",
+      "you?",
+    ]);
 
     const lastTokens = buildDisplayTokens(tokenizeWithItalics(cues[5].rawText)).map(
       (token) => token.text,
