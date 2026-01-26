@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { useDictionaryStore } from "../../state/dictionaryStore";
 import { usePrefsStore } from "../../state/prefsStore";
@@ -156,6 +157,8 @@ export default function PlayerPage() {
   const [secondarySubtitleEnabled, setSecondarySubtitleEnabled] = useState<boolean>(false);
   const [isSecondarySubtitleRtl, setIsSecondarySubtitleRtl] = useState<boolean>(false);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const [isMuted, setIsMuted] = useState<boolean>(false);
   const lastVideoTimeSavedRef = useRef<number>(0);
   const addWord = useDictionaryStore((state) => state.addUnknownWordFromToken);
   const classForToken = useDictionaryStore((state) => state.classForToken);
@@ -230,6 +233,25 @@ export default function PlayerPage() {
     document.addEventListener("fullscreenchange", handleFullscreenChange);
     return () => {
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const syncPlaybackState = () => setIsPlaying(!video.paused);
+    const syncMutedState = () => setIsMuted(video.muted);
+
+    syncPlaybackState();
+    syncMutedState();
+
+    video.addEventListener("play", syncPlaybackState);
+    video.addEventListener("pause", syncPlaybackState);
+    video.addEventListener("volumechange", syncMutedState);
+    return () => {
+      video.removeEventListener("play", syncPlaybackState);
+      video.removeEventListener("pause", syncPlaybackState);
+      video.removeEventListener("volumechange", syncMutedState);
     };
   }, []);
 
@@ -554,12 +576,19 @@ export default function PlayerPage() {
     }
   }, []);
 
+  const toggleMute = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.muted = !video.muted;
+  }, []);
+
   const seekBy = useCallback((deltaSeconds: number) => {
     const video = videoRef.current;
     if (!video) return;
+    if (video.readyState === 0) return;
     const nextTime = Math.min(
       Math.max(video.currentTime + deltaSeconds, 0),
-      Number.isFinite(video.duration) ? video.duration : Number.MAX_SAFE_INTEGER,
+      Number.isFinite(video.duration) ? video.duration : Number.POSITIVE_INFINITY,
     );
     video.currentTime = nextTime;
   }, []);
@@ -791,55 +820,70 @@ export default function PlayerPage() {
     });
   }, [secondaryCues.length]);
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
+  const focusPlayerContainer = useCallback(() => {
+    playerContainerRef.current?.focus();
+  }, []);
+
+  const handleShortcutKeyDown = useCallback(
+    (event: KeyboardEvent) =>
       handlePlayerKeyDown(event, {
         video: videoRef.current,
         seekBy,
         toggleFullscreen,
+        toggleMute,
         togglePlayback,
         toggleSecondarySubtitle,
-      });
-    };
+      }),
+    [seekBy, toggleFullscreen, toggleMute, togglePlayback, toggleSecondarySubtitle],
+  );
 
-    window.addEventListener("keydown", handleKeyDown);
+  const handleShortcutKeyDownCapture = useCallback(
+    (event: ReactKeyboardEvent<HTMLElement>) => {
+      const handled = handleShortcutKeyDown(event.nativeEvent);
+      if (handled) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    },
+    [handleShortcutKeyDown],
+  );
+
+  useEffect(() => {
+    document.addEventListener("keydown", handleShortcutKeyDown, true);
     return () => {
-      window.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("keydown", handleShortcutKeyDown, true);
     };
-  }, [seekBy, toggleFullscreen, togglePlayback, toggleSecondarySubtitle]);
+  }, [handleShortcutKeyDown]);
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[2fr,1fr]">
+    <div className="grid gap-6 lg:grid-cols-[2fr,1fr]" onKeyDown={handleShortcutKeyDownCapture}>
       <section className="space-y-4">
         <div
           ref={playerContainerRef}
           className="relative aspect-video overflow-hidden rounded-lg bg-black shadow-xl"
           onDoubleClick={toggleFullscreen}
+          tabIndex={-1}
         >
-          <button
-            type="button"
-            className="absolute right-3 top-3 z-10 rounded bg-black/70 px-3 py-1 text-xs font-medium text-white transition hover:bg-black/80 focus:outline-none focus-visible:outline-none"
-            onClick={(event) => {
-              event.stopPropagation();
-              toggleFullscreen();
-              if (event.currentTarget instanceof HTMLElement) {
-                event.currentTarget.blur();
-              }
-            }}
-          >
-            {isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
-          </button>
           <video
             ref={videoRef}
             className="h-full w-full focus:outline-none focus-visible:outline-none"
-            controls
-            controlsList="nofullscreen"
             onTimeUpdate={handleTimeUpdate}
             src={videoUrl ?? undefined}
             tabIndex={-1}
           >
             <track kind="subtitles" srcLang="en" label={subtitleName || "Subtitles"} />
           </video>
+          <button
+            type="button"
+            className="absolute right-3 top-3 z-10 rounded bg-black/70 px-3 py-1 text-xs font-medium text-white transition hover:bg-black/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+            onClick={(event) => {
+              event.stopPropagation();
+              toggleFullscreen();
+              focusPlayerContainer();
+            }}
+          >
+            {isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
+          </button>
           {secondarySubtitleEnabled && activeSecondaryCues.length > 0 && (
             <div className="pointer-events-none absolute inset-0 flex flex-col justify-start p-6">
               <div className="pointer-events-auto flex flex-col items-center gap-3">
@@ -884,16 +928,75 @@ export default function PlayerPage() {
           )}
         </div>
         <div className="flex flex-wrap items-center gap-3 rounded-lg bg-white/5 p-3 text-sm text-white/80">
+          <span className="font-medium text-white">Controls</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+              onClick={() => {
+                togglePlayback();
+                focusPlayerContainer();
+              }}
+              aria-label={isPlaying ? "Pause video" : "Play video"}
+            >
+              {isPlaying ? "Pause" : "Play"} <span className="text-xs text-white/60">(Space/K)</span>
+            </button>
+            <button
+              type="button"
+              className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+              onClick={() => {
+                toggleMute();
+                focusPlayerContainer();
+              }}
+              aria-label={isMuted ? "Unmute video" : "Mute video"}
+            >
+              {isMuted ? "Unmute" : "Mute"} <span className="text-xs text-white/60">(M)</span>
+            </button>
+            <button
+              type="button"
+              className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+              onClick={() => {
+                seekBy(-5);
+                focusPlayerContainer();
+              }}
+              aria-label="Seek backward 5 seconds"
+            >
+              -5s <span className="text-xs text-white/60">(←)</span>
+            </button>
+            <button
+              type="button"
+              className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+              onClick={() => {
+                seekBy(5);
+                focusPlayerContainer();
+              }}
+              aria-label="Seek forward 5 seconds"
+            >
+              +5s <span className="text-xs text-white/60">(→)</span>
+            </button>
+            <button
+              type="button"
+              className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+              onClick={() => {
+                toggleFullscreen();
+                focusPlayerContainer();
+              }}
+              aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+            >
+              {isFullscreen ? "Exit Fullscreen" : "Fullscreen"}{" "}
+              <span className="text-xs text-white/60">(F)</span>
+            </button>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-3 rounded-lg bg-white/5 p-3 text-sm text-white/80">
           <span className="font-medium text-white">Subtitle timing</span>
           <div className="flex items-center gap-2">
             <button
               type="button"
               className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:outline-none"
-              onClick={(event) => {
+              onClick={() => {
                 adjustSubtitleOffset(-500);
-                if (event.currentTarget instanceof HTMLElement) {
-                  event.currentTarget.blur();
-                }
+                focusPlayerContainer();
               }}
             >
               –0.5s
@@ -901,11 +1004,9 @@ export default function PlayerPage() {
             <button
               type="button"
               className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:outline-none"
-              onClick={(event) => {
+              onClick={() => {
                 adjustSubtitleOffset(500);
-                if (event.currentTarget instanceof HTMLElement) {
-                  event.currentTarget.blur();
-                }
+                focusPlayerContainer();
               }}
             >
               +0.5s
@@ -957,11 +1058,9 @@ export default function PlayerPage() {
               <button
                 type="button"
                 className="rounded bg-white/10 px-2 py-1 text-xs font-medium text-white transition hover:bg-white/20 focus:outline-none focus-visible:outline-none"
-                onClick={(event) => {
+                onClick={() => {
                   toggleSecondarySubtitle();
-                  if (event.currentTarget instanceof HTMLElement) {
-                    event.currentTarget.blur();
-                  }
+                  focusPlayerContainer();
                 }}
                 disabled={secondaryCues.length === 0}
               >
@@ -1004,11 +1103,9 @@ export default function PlayerPage() {
                 <button
                   type="button"
                   className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:outline-none"
-                  onClick={(event) => {
+                  onClick={() => {
                     adjustSecondarySubtitleOffset(-500);
-                    if (event.currentTarget instanceof HTMLElement) {
-                      event.currentTarget.blur();
-                    }
+                    focusPlayerContainer();
                   }}
                 >
                   –0.5s
@@ -1016,11 +1113,9 @@ export default function PlayerPage() {
                 <button
                   type="button"
                   className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:outline-none"
-                  onClick={(event) => {
+                  onClick={() => {
                     adjustSecondarySubtitleOffset(500);
-                    if (event.currentTarget instanceof HTMLElement) {
-                      event.currentTarget.blur();
-                    }
+                    focusPlayerContainer();
                   }}
                 >
                   +0.5s
