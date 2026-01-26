@@ -52,6 +52,7 @@ describe("subtitle display tokens", () => {
       "are",
       "you?",
     ]);
+    expect(firstTokens.some((token) => /[\u0001\u0002]/.test(token.text))).toBe(false);
     expect(firstTokens.slice(0, 3).every((token) => token.italic)).toBe(false);
     expect(firstTokens.slice(3).every((token) => token.italic)).toBe(true);
 
