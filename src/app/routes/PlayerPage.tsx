@@ -998,7 +998,7 @@ export default function PlayerPage() {
                     aria-label={isPlaying ? "Pause video" : "Play video"}
                   >
                     <span className="player-play-icon" aria-hidden />
-                    <span className="player-tooltip">Space/K</span>
+                    <span className="player-tooltip">Space</span>
                   </button>
                   <div className="group relative flex items-center gap-2">
                     <button
