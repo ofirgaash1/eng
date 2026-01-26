@@ -1077,7 +1077,7 @@ export default function PlayerPage() {
                     </button>
                     <button
                       type="button"
-                      className="group player-pill-button text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                      className="group player-icon-button text-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
                       onClick={() => {
                         seekBy(-5);
                         focusPlayerContainer();
@@ -1088,7 +1088,7 @@ export default function PlayerPage() {
                     </button>
                     <button
                       type="button"
-                      className="group player-pill-button text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                      className="group player-icon-button text-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
                       onClick={() => {
                         seekBy(5);
                         focusPlayerContainer();
@@ -1120,7 +1120,7 @@ export default function PlayerPage() {
                   ))}
                 </div>
               </div>
-              <div className="pointer-events-none absolute inset-0 z-30 flex flex-col justify-start p-6">
+              <div className="pointer-events-none absolute inset-0 z-10 flex flex-col justify-start p-6">
                 <div className="pointer-events-none flex flex-col items-center gap-3">
                   {activeSecondaryCues.map((cue) => (
                     <div
@@ -1159,7 +1159,7 @@ export default function PlayerPage() {
                   ))}
                 </div>
               </div>
-              <div className="pointer-events-none absolute inset-0 z-30 flex flex-col justify-end p-6">
+              <div className="pointer-events-none absolute inset-0 z-10 flex flex-col justify-end p-6">
                 <div className="pointer-events-none flex flex-col items-center gap-3">
                   {activeCues.map((cue) => (
                     <div
