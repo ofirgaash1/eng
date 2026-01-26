@@ -29,10 +29,16 @@ body {
     line-height: var(--subtitle-line-height, 1.35);
     color: var(--subtitle-color, #ffffff);
     text-shadow: 0 2px 8px rgba(0, 0, 0, calc(var(--subtitle-shadow, 1) * 0.8));
-    background: var(--subtitle-bg, rgba(0, 0, 0, 0.35));
     -webkit-text-stroke: calc(var(--subtitle-outline, 1) * 1px) rgba(0, 0, 0, 0.9);
     padding: 0.5rem 0.75rem;
     border-radius: 0.75rem;
+  }
+
+  .subtitle-overlay-bg {
+    background: var(--subtitle-bg, rgba(0, 0, 0, 0.35));
+    color: transparent;
+    text-shadow: none;
+    -webkit-text-stroke: 0 transparent;
   }
 
   .subtitle-overlay-secondary {
@@ -49,10 +55,11 @@ body {
 
   .player-play-button {
     position: relative;
-    width: 42px;
-    height: 32px;
+    width: 40px;
+    height: 28px;
     border-radius: 9999px;
-    background: rgba(255, 255, 255, 0.12);
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.25);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -62,7 +69,7 @@ body {
   }
 
   .player-play-button:hover {
-    background: rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.12);
   }
 
   .player-play-button::before,
@@ -96,7 +103,7 @@ body {
   .player-play-icon::after {
     content: "";
     position: absolute;
-    width: 120%;
+    width: 110%;
     height: 100%;
     background: rgba(5, 5, 5, 0.9);
     transition: transform 0.3s ease;

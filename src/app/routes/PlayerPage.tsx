@@ -58,14 +58,7 @@ type WorkerResponse = {
   error?: string;
 };
 
-function SubtitleCue({
-  cue,
-  onTokenClick,
-  onTokenContextMenu,
-  classForToken,
-  isRtl = false,
-  className,
-}: SubtitleCueProps) {
+function useDisplayTokens(cue: Cue, isRtl: boolean) {
   const tokens = useMemo(() => tokenizeWithItalics(cue.rawText), [cue.rawText]);
   const normalizedTokens = useMemo(() => {
     if (!isRtl) return tokens;
@@ -78,10 +71,18 @@ function SubtitleCue({
     }
     return tokens;
   }, [isRtl, tokens]);
-  const displayTokens = useMemo(
-    () => buildDisplayTokens(normalizedTokens),
-    [normalizedTokens]
-  );
+  return useMemo(() => buildDisplayTokens(normalizedTokens), [normalizedTokens]);
+}
+
+function SubtitleCue({
+  cue,
+  onTokenClick,
+  onTokenContextMenu,
+  classForToken,
+  isRtl = false,
+  className,
+}: SubtitleCueProps) {
+  const displayTokens = useDisplayTokens(cue, isRtl);
   return (
     <div className={`flex flex-wrap ${className ?? ""}`} dir={isRtl ? "rtl" : "ltr"}>
       {displayTokens.map((displayToken, index) => {
@@ -117,6 +118,31 @@ function SubtitleCue({
               {displayToken.text}
             </span>
           </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function SubtitleCueBackground({
+  cue,
+  isRtl = false,
+  className,
+}: Pick<SubtitleCueProps, "cue" | "isRtl" | "className">) {
+  const displayTokens = useDisplayTokens(cue, isRtl);
+  return (
+    <div className={`flex flex-wrap ${className ?? ""}`} dir={isRtl ? "rtl" : "ltr"}>
+      {displayTokens.map((displayToken, index) => {
+        const prevToken = index > 0 ? displayTokens[index - 1].token : undefined;
+        const token = displayToken.token;
+        const spacingClass = shouldAddSpaceBefore(prevToken, token) ? "ms-1" : "";
+        return (
+          <span
+            key={`${displayToken.text}-${index}`}
+            className={`rounded px-1 py-0.5 ${spacingClass}`}
+          >
+            {displayToken.text}
+          </span>
         );
       })}
     </div>
@@ -1077,46 +1103,82 @@ export default function PlayerPage() {
             </div>
           </div>
           {secondarySubtitleEnabled && activeSecondaryCues.length > 0 && (
-            <div className="pointer-events-none absolute inset-0 z-20 flex flex-col justify-start p-6">
-              <div className="pointer-events-auto flex flex-col items-center gap-3">
-                {activeSecondaryCues.map((cue) => (
-                  <div
-                    key={`${cue.startMs}-${cue.endMs}`}
-                    className="subtitle-overlay subtitle-overlay-secondary max-w-3xl text-center"
-                  >
-                    <SubtitleCue
-                      cue={cue}
-                      classForToken={classForToken}
-                      onTokenClick={handleTokenClick}
-                      onTokenContextMenu={handleTokenContextMenu}
-                      isRtl={isSecondarySubtitleRtl}
-                      className="justify-center text-center"
-                    />
-                  </div>
-                ))}
+            <>
+              <div className="pointer-events-none absolute inset-0 z-[5] flex flex-col justify-start p-6">
+                <div className="pointer-events-none flex flex-col items-center gap-3">
+                  {activeSecondaryCues.map((cue) => (
+                    <div
+                      key={`${cue.startMs}-${cue.endMs}-bg`}
+                      className="subtitle-overlay subtitle-overlay-secondary subtitle-overlay-bg max-w-3xl text-center"
+                    >
+                      <SubtitleCueBackground
+                        cue={cue}
+                        isRtl={isSecondarySubtitleRtl}
+                        className="justify-center text-center"
+                      />
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
+              <div className="pointer-events-none absolute inset-0 z-20 flex flex-col justify-start p-6">
+                <div className="pointer-events-auto flex flex-col items-center gap-3">
+                  {activeSecondaryCues.map((cue) => (
+                    <div
+                      key={`${cue.startMs}-${cue.endMs}`}
+                      className="subtitle-overlay subtitle-overlay-secondary max-w-3xl text-center"
+                    >
+                      <SubtitleCue
+                        cue={cue}
+                        classForToken={classForToken}
+                        onTokenClick={handleTokenClick}
+                        onTokenContextMenu={handleTokenContextMenu}
+                        isRtl={isSecondarySubtitleRtl}
+                        className="justify-center text-center"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
           )}
           {activeCues.length > 0 && (
-            <div className="pointer-events-none absolute inset-0 z-20 flex flex-col justify-end p-6">
-              <div className="pointer-events-auto flex flex-col items-center gap-3">
-                {activeCues.map((cue) => (
-                  <div
-                    key={`${cue.startMs}-${cue.endMs}`}
-                    className="subtitle-overlay max-w-3xl text-center"
-                  >
-                    <SubtitleCue
-                      cue={cue}
-                      classForToken={classForToken}
-                      onTokenClick={handleTokenClick}
-                      onTokenContextMenu={handleTokenContextMenu}
-                      isRtl={isSubtitleRtl}
-                      className="justify-center text-center"
-                    />
-                  </div>
-                ))}
+            <>
+              <div className="pointer-events-none absolute inset-0 z-[5] flex flex-col justify-end p-6">
+                <div className="pointer-events-none flex flex-col items-center gap-3">
+                  {activeCues.map((cue) => (
+                    <div
+                      key={`${cue.startMs}-${cue.endMs}-bg`}
+                      className="subtitle-overlay subtitle-overlay-bg max-w-3xl text-center"
+                    >
+                      <SubtitleCueBackground
+                        cue={cue}
+                        isRtl={isSubtitleRtl}
+                        className="justify-center text-center"
+                      />
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
+              <div className="pointer-events-none absolute inset-0 z-20 flex flex-col justify-end p-6">
+                <div className="pointer-events-auto flex flex-col items-center gap-3">
+                  {activeCues.map((cue) => (
+                    <div
+                      key={`${cue.startMs}-${cue.endMs}`}
+                      className="subtitle-overlay max-w-3xl text-center"
+                    >
+                      <SubtitleCue
+                        cue={cue}
+                        classForToken={classForToken}
+                        onTokenClick={handleTokenClick}
+                        onTokenContextMenu={handleTokenContextMenu}
+                        isRtl={isSubtitleRtl}
+                        className="justify-center text-center"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
           )}
         </div>
         <div className="flex flex-wrap items-center gap-3 rounded-lg bg-white/5 p-3 text-sm text-white/80">
