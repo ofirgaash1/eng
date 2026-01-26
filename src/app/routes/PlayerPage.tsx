@@ -10,6 +10,12 @@ import { useDictionaryStore } from "../../state/dictionaryStore";
 import { usePrefsStore } from "../../state/prefsStore";
 import type { Cue, Token } from "../../core/types";
 import { tokenize } from "../../core/nlp/tokenize";
+import {
+  buildDisplayTokens,
+  isWordLikeToken,
+  shouldAddSpaceBefore,
+  tokenizeWithItalics,
+} from "../../core/subtitles/displayTokens";
 import { hashBlob } from "../../utils/file";
 import { upsertSubtitleFile } from "../../data/filesRepo";
 import { getCuesForFile, saveCuesForFile } from "../../data/cuesRepo";
@@ -26,39 +32,10 @@ function formatTime(ms: number) {
 }
 
 const RTL_TEXT_RE = /[\u0591-\u07FF\uFB1D-\uFDFD\uFE70-\uFEFC]/;
-const NO_SPACE_BEFORE_RE = /^[\)\]\}»”’.,!?;:%…،؛؟。！？]+$/u;
-const NO_SPACE_AFTER_RE = /^[\(\[\{«“‘]+$/u;
 const RTL_LEADING_PUNCT_RE = /^[.!?…،؛؟]+$/u;
 
 function detectRtlFromCues(cues: Cue[]): boolean {
   return cues.some((cue) => RTL_TEXT_RE.test(cue.rawText));
-}
-
-function isWordLikeToken(token: Token): boolean {
-  return token.isWord || /^\d+$/.test(token.text);
-}
-
-function isNoSpaceBefore(token: Token): boolean {
-  return !token.isWord && NO_SPACE_BEFORE_RE.test(token.text);
-}
-
-function isNoSpaceAfter(token: Token): boolean {
-  return !token.isWord && NO_SPACE_AFTER_RE.test(token.text);
-}
-
-function shouldAddSpaceBefore(prev: Token | undefined, next: Token): boolean {
-  if (!prev) return false;
-  if (isNoSpaceBefore(next)) return false;
-  if (isNoSpaceAfter(prev)) return false;
-
-  const prevIsWordLike = isWordLikeToken(prev);
-  const nextIsWordLike = isWordLikeToken(next);
-
-  if (prevIsWordLike && nextIsWordLike) return true;
-  if (prevIsWordLike && !nextIsWordLike) return true;
-  if (!prevIsWordLike && nextIsWordLike) return true;
-
-  return false;
 }
 
 function shouldMoveLeadingPunctuation(token: Token): boolean {
@@ -95,26 +72,36 @@ function SubtitleCue({
   isRtl = false,
   className,
 }: SubtitleCueProps) {
-  const tokens = useMemo(() => cue.tokens ?? tokenize(cue.rawText), [cue]);
-  const displayTokens = useMemo(() => {
+  const tokens = useMemo(() => {
+    if (cue.tokens) {
+      return cue.tokens.map((token) => ({ token, italic: false }));
+    }
+    return tokenizeWithItalics(cue.rawText);
+  }, [cue]);
+  const normalizedTokens = useMemo(() => {
     if (!isRtl) return tokens;
-    const firstWordIndex = tokens.findIndex((token) => isWordLikeToken(token));
+    const firstWordIndex = tokens.findIndex((token) => isWordLikeToken(token.token));
     if (firstWordIndex <= 0) return tokens;
     const leading = tokens.slice(0, firstWordIndex);
     if (leading.length === 0) return tokens;
-    if (leading.every((token) => shouldMoveLeadingPunctuation(token))) {
+    if (leading.every((token) => shouldMoveLeadingPunctuation(token.token))) {
       return [...tokens.slice(firstWordIndex), ...leading];
     }
     return tokens;
   }, [isRtl, tokens]);
+  const displayTokens = useMemo(
+    () => buildDisplayTokens(normalizedTokens),
+    [normalizedTokens]
+  );
   return (
     <div className={`flex flex-wrap ${className ?? ""}`} dir={isRtl ? "rtl" : "ltr"}>
-      {displayTokens.map((token, index) => {
-        const prevToken = index > 0 ? displayTokens[index - 1] : undefined;
+      {displayTokens.map((displayToken, index) => {
+        const prevToken = index > 0 ? displayTokens[index - 1].token : undefined;
+        const token = displayToken.token;
         const spacingClass = shouldAddSpaceBefore(prevToken, token) ? "ms-1" : "";
         return (
           <button
-            key={`${token.text}-${index}`}
+            key={`${displayToken.text}-${index}`}
             type="button"
             className={`rounded px-0.5 text-left ${spacingClass} ${
               token.isWord ? "focus:outline-none focus-visible:outline-none" : "cursor-default"
@@ -133,8 +120,12 @@ function SubtitleCue({
             }}
             disabled={!token.isWord}
           >
-            <span className={`rounded px-1 py-0.5 transition-colors ${classForToken(token)}`}>
-              {token.text}
+            <span
+              className={`rounded px-1 py-0.5 transition-colors ${
+                displayToken.italic ? "italic" : ""
+              } ${classForToken(token)}`}
+            >
+              {displayToken.text}
             </span>
           </button>
         );
