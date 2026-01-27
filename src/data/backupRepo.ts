@@ -84,7 +84,7 @@ function looksLikeBackupData(value: unknown): value is BackupPayload["data"] {
     Array.isArray(candidate.subtitleFiles) ||
     Array.isArray(candidate.subtitleCues) ||
     Array.isArray(candidate.sessions) ||
-    (candidate.prefs && typeof candidate.prefs === "object")
+    Boolean(candidate.prefs && typeof candidate.prefs === "object")
   );
 }
 
@@ -128,7 +128,7 @@ function buildBackupSummary(
     subtitleFiles: subtitleFiles.length,
     subtitleCues: subtitleCues.length,
     sessions: sessions.length,
-    hasPrefs: Boolean(prefs),
+    hasPrefs: !!prefs,
   };
 }
 
