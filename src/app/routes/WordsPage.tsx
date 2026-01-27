@@ -299,7 +299,7 @@ export default function WordsPage() {
             Copy Words + Sentences
           </button>
           <a
-            href="https://chatgpt.com/share/69794951-2cc4-8013-964a-5f098056b478"
+            href="https://chatgpt.com/share/69794a46-5fc8-8013-9c4d-1b171dec7f09"
             target="_blank"
             rel="noreferrer"
             className="rounded bg-emerald-500/20 px-3 py-1 text-xs font-medium text-emerald-200 hover:bg-emerald-500/30"
