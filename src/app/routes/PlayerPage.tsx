@@ -1037,7 +1037,7 @@ export default function PlayerPage() {
       <section className="space-y-4">
         <div
           ref={playerContainerRef}
-          className={`relative aspect-video overflow-hidden rounded-lg bg-black shadow-xl ${
+          className={`relative aspect-video overflow-hidden rounded-lg bg-black shadow-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 ${
             isFullscreen && !showCursor ? "cursor-none" : ""
           }`}
           onDoubleClick={toggleFullscreen}
