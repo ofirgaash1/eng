@@ -27,6 +27,7 @@ import { parseSrt } from "../../core/parsing/srtParser";
 
 const RTL_TEXT_RE = /[\u0591-\u07FF\uFB1D-\uFDFD\uFE70-\uFEFC]/;
 const RTL_LEADING_PUNCT_RE = /^[.!?…،؛؟]+$/u;
+const VOLUME_STEPS = [1, 2, 3, 4, 5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100];
 
 function detectRtlFromCues(cues: Cue[]): boolean {
   return cues.some((cue) => RTL_TEXT_RE.test(cue.rawText));
@@ -183,7 +184,9 @@ export default function PlayerPage() {
   const [volume, setVolume] = useState<number>(1);
   const [durationMs, setDurationMs] = useState<number | null>(null);
   const [showControls, setShowControls] = useState<boolean>(true);
+  const [showCursor, setShowCursor] = useState<boolean>(true);
   const hideControlsTimeoutRef = useRef<number | null>(null);
+  const hideCursorTimeoutRef = useRef<number | null>(null);
   const lastVideoTimeSavedRef = useRef<number>(0);
   const addWord = useDictionaryStore((state) => state.addUnknownWordFromToken);
   const classForToken = useDictionaryStore((state) => state.classForToken);
@@ -652,6 +655,40 @@ export default function PlayerPage() {
     setVolume(nextVolume);
   }, []);
 
+  const stepVolume = useCallback((direction: "up" | "down") => {
+    const video = videoRef.current;
+    if (!video) return;
+    const currentPercent = Math.round(video.volume * 100);
+    const clampedPercent = Math.min(Math.max(currentPercent, 0), 100);
+    let nextPercent = VOLUME_STEPS[0];
+
+    if (direction === "up") {
+      nextPercent = VOLUME_STEPS[VOLUME_STEPS.length - 1];
+      for (const step of VOLUME_STEPS) {
+        if (step > clampedPercent) {
+          nextPercent = step;
+          break;
+        }
+      }
+    } else {
+      nextPercent = VOLUME_STEPS[0];
+      for (let index = VOLUME_STEPS.length - 1; index >= 0; index -= 1) {
+        const step = VOLUME_STEPS[index];
+        if (step < clampedPercent) {
+          nextPercent = step;
+          break;
+        }
+      }
+    }
+
+    const nextVolume = nextPercent / 100;
+    video.volume = nextVolume;
+    if (nextVolume > 0) {
+      video.muted = false;
+    }
+    setVolume(nextVolume);
+  }, []);
+
   const processSubtitleFile = useCallback(
     async (file: File) => {
       resetPlayback();
@@ -900,6 +937,13 @@ export default function PlayerPage() {
     }
   }, []);
 
+  const clearHideCursorTimeout = useCallback(() => {
+    if (hideCursorTimeoutRef.current !== null) {
+      window.clearTimeout(hideCursorTimeoutRef.current);
+      hideCursorTimeoutRef.current = null;
+    }
+  }, []);
+
   const scheduleHideControls = useCallback(() => {
     clearHideControlsTimeout();
     if (!isPlaying) return;
@@ -913,6 +957,24 @@ export default function PlayerPage() {
     scheduleHideControls();
   }, [scheduleHideControls]);
 
+  const scheduleHideCursor = useCallback(() => {
+    clearHideCursorTimeout();
+    if (!isFullscreen) return;
+    hideCursorTimeoutRef.current = window.setTimeout(() => {
+      setShowCursor(false);
+    }, 1000);
+  }, [clearHideCursorTimeout, isFullscreen]);
+
+  const showCursorNow = useCallback(() => {
+    setShowCursor(true);
+    scheduleHideCursor();
+  }, [scheduleHideCursor]);
+
+  const handleMouseMove = useCallback(() => {
+    showControlsNow();
+    showCursorNow();
+  }, [showControlsNow, showCursorNow]);
+
   const handleShortcutKeyDown = useCallback(
     (event: KeyboardEvent) =>
       handlePlayerKeyDown(event, {
@@ -922,8 +984,9 @@ export default function PlayerPage() {
         toggleMute,
         togglePlayback,
         toggleSecondarySubtitle,
+        stepVolume,
       }),
-    [seekBy, toggleFullscreen, toggleMute, togglePlayback, toggleSecondarySubtitle],
+    [seekBy, stepVolume, toggleFullscreen, toggleMute, togglePlayback, toggleSecondarySubtitle],
   );
 
   const handleShortcutKeyDownCapture = useCallback(
@@ -954,19 +1017,31 @@ export default function PlayerPage() {
   }, [clearHideControlsTimeout, isPlaying, scheduleHideControls]);
 
   useEffect(() => {
+    if (!isFullscreen) {
+      clearHideCursorTimeout();
+      setShowCursor(true);
+      return;
+    }
+    scheduleHideCursor();
+  }, [clearHideCursorTimeout, isFullscreen, scheduleHideCursor]);
+
+  useEffect(() => {
     return () => {
       clearHideControlsTimeout();
+      clearHideCursorTimeout();
     };
-  }, [clearHideControlsTimeout]);
+  }, [clearHideControlsTimeout, clearHideCursorTimeout]);
 
   return (
     <div className="grid gap-6 lg:grid-cols-[2fr,1fr]" onKeyDown={handleShortcutKeyDownCapture}>
       <section className="space-y-4">
         <div
           ref={playerContainerRef}
-          className="relative aspect-video overflow-hidden rounded-lg bg-black shadow-xl"
+          className={`relative aspect-video overflow-hidden rounded-lg bg-black shadow-xl ${
+            isFullscreen && !showCursor ? "cursor-none" : ""
+          }`}
           onDoubleClick={toggleFullscreen}
-          onMouseMove={showControlsNow}
+          onMouseMove={handleMouseMove}
           onMouseLeave={() => {
             if (isPlaying) {
               setShowControls(false);

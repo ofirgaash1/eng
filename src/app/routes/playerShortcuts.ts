@@ -5,6 +5,7 @@ type PlayerShortcutHandlers = {
   toggleMute: () => void;
   togglePlayback: () => void;
   toggleSecondarySubtitle: () => void;
+  stepVolume: (direction: "up" | "down") => void;
 };
 
 const INTERACTIVE_TAGS = ["INPUT", "TEXTAREA", "SELECT"];
@@ -34,6 +35,7 @@ export function handlePlayerKeyDown(
 ): boolean {
   const { video, seekBy, toggleFullscreen, toggleMute, togglePlayback, toggleSecondarySubtitle } =
     handlers;
+  const { stepVolume } = handlers;
   if (!video) return false;
   if (shouldIgnoreTarget(event.target)) return false;
   if (event.altKey || event.ctrlKey || event.metaKey) return false;
@@ -56,6 +58,16 @@ export function handlePlayerKeyDown(
   if (matchesShortcut(event, ["ArrowRight"], ["ArrowRight"])) {
     stopShortcutEvent(event);
     seekBy(5);
+    return true;
+  }
+  if (matchesShortcut(event, ["ArrowUp"], ["ArrowUp"])) {
+    stopShortcutEvent(event);
+    stepVolume("up");
+    return true;
+  }
+  if (matchesShortcut(event, ["ArrowDown"], ["ArrowDown"])) {
+    stopShortcutEvent(event);
+    stepVolume("down");
     return true;
   }
   if (matchesShortcut(event, ["KeyF"], ["f", "F"])) {

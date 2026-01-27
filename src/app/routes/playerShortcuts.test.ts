@@ -30,6 +30,7 @@ describe("handlePlayerKeyDown", () => {
     const toggleFullscreen = vi.fn();
     const toggleMute = vi.fn();
     const toggleSecondarySubtitle = vi.fn();
+    const stepVolume = vi.fn();
     const seekBy = vi.fn((delta: number) => {
       video.currentTime += delta;
     });
@@ -42,6 +43,7 @@ describe("handlePlayerKeyDown", () => {
         toggleMute,
         togglePlayback,
         toggleSecondarySubtitle,
+        stepVolume,
       }),
     ).toBe(true);
     expect(isPlaying).toBe(true);
@@ -53,6 +55,7 @@ describe("handlePlayerKeyDown", () => {
       toggleMute,
       togglePlayback,
       toggleSecondarySubtitle,
+      stepVolume,
     });
     expect(seekBy).toHaveBeenLastCalledWith(5);
     expect(video.currentTime).toBe(15);
@@ -64,6 +67,7 @@ describe("handlePlayerKeyDown", () => {
       toggleMute,
       togglePlayback,
       toggleSecondarySubtitle,
+      stepVolume,
     });
     expect(toggleFullscreen).toHaveBeenCalled();
 
@@ -74,8 +78,31 @@ describe("handlePlayerKeyDown", () => {
       toggleMute,
       togglePlayback,
       toggleSecondarySubtitle,
+      stepVolume,
     });
     expect(toggleSecondarySubtitle).toHaveBeenCalled();
+
+    handlePlayerKeyDown(createEvent("ArrowUp"), {
+      video,
+      seekBy,
+      toggleFullscreen,
+      toggleMute,
+      togglePlayback,
+      toggleSecondarySubtitle,
+      stepVolume,
+    });
+    expect(stepVolume).toHaveBeenLastCalledWith("up");
+
+    handlePlayerKeyDown(createEvent("ArrowDown"), {
+      video,
+      seekBy,
+      toggleFullscreen,
+      toggleMute,
+      togglePlayback,
+      toggleSecondarySubtitle,
+      stepVolume,
+    });
+    expect(stepVolume).toHaveBeenLastCalledWith("down");
   });
 
   it("falls back to key values when code is missing", () => {
@@ -93,6 +120,7 @@ describe("handlePlayerKeyDown", () => {
       toggleMute: vi.fn(),
       togglePlayback: vi.fn(),
       toggleSecondarySubtitle: vi.fn(),
+      stepVolume: vi.fn(),
     });
 
     expect(handled).toBe(true);
