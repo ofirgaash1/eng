@@ -1,4 +1,6 @@
-import { ChangeEvent, useEffect, useState } from "react";
+import { ChangeEvent, useEffect, useRef, useState } from "react";
+import { exportAllData, importAllData, summarizeBackup } from "../../data/backupRepo";
+import { useDictionaryStore } from "../../state/dictionaryStore";
 import { usePrefsStore } from "../../state/prefsStore";
 
 export default function SettingsPage() {
@@ -11,12 +13,36 @@ export default function SettingsPage() {
   const initialized = usePrefsStore((state) => state.initialized);
   const initialize = usePrefsStore((state) => state.initialize);
   const [libraryError, setLibraryError] = useState<string | null>(null);
+  const [transferError, setTransferError] = useState<string | null>(null);
+  const [transferSuccess, setTransferSuccess] = useState<string | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<{ percent: number; stage: string } | null>(
+    null
+  );
+  const [importElapsed, setImportElapsed] = useState(0);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!initialized) {
       void initialize();
     }
   }, [initialized, initialize]);
+
+  useEffect(() => {
+    if (!isImporting) {
+      setImportElapsed(0);
+      return;
+    }
+    const start = Date.now();
+    setImportElapsed(0);
+    const interval = window.setInterval(() => {
+      setImportElapsed(Math.floor((Date.now() - start) / 1000));
+    }, 1000);
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [isImporting]);
 
   const handleNumberChange = (
     event: ChangeEvent<HTMLInputElement>,
@@ -60,6 +86,73 @@ export default function SettingsPage() {
   const handleClearLibrary = async () => {
     setLibraryError(null);
     await setMediaLibrary(undefined);
+  };
+
+  const handleExportEverything = async () => {
+    setTransferError(null);
+    setTransferSuccess(null);
+    setIsExporting(true);
+    try {
+      const { payload, counts } = await exportAllData();
+      const blob = new Blob([JSON.stringify(payload, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `subtitle-word-tracker-backup-${new Date().toISOString().split("T")[0]}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      setTransferSuccess(
+        `Exported ${counts.words} word${counts.words === 1 ? "" : "s"} and ${counts.subtitleFiles} subtitle file${counts.subtitleFiles === 1 ? "" : "s"}.`
+      );
+    } catch (error) {
+      setTransferSuccess(null);
+      setTransferError(error instanceof Error ? error.message : "Unable to export data.");
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleImportEverything = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setTransferError(null);
+    setTransferSuccess(null);
+    setIsImporting(true);
+    setImportProgress({ percent: 5, stage: "Reading file" });
+    try {
+      const text = await file.text();
+      setImportProgress({ percent: 15, stage: "Parsing backup" });
+      const payload = JSON.parse(text);
+      const summary = summarizeBackup(payload);
+      setImportProgress({
+        percent: 15,
+        stage: `Parsed backup (${summary.words} words, ${summary.subtitleFiles} files)`,
+      });
+      const counts = await importAllData(payload, {
+        onProgress: (progress) => {
+          const percent = Math.min(100, Math.max(15, 15 + progress.percent * 0.85));
+          setImportProgress({ percent, stage: progress.stage });
+        },
+      });
+      usePrefsStore.setState({ initialized: false });
+      void usePrefsStore.getState().initialize();
+      useDictionaryStore.setState({ initialized: false });
+      void useDictionaryStore.getState().initialize();
+      setTransferSuccess(
+        `Merged data. Now storing ${counts.words} word${counts.words === 1 ? "" : "s"} (${counts.addedWords} added) and ${counts.subtitleFiles} subtitle file${counts.subtitleFiles === 1 ? "" : "s"} (${counts.addedSubtitleFiles} added).`
+      );
+    } catch (error) {
+      setTransferSuccess(null);
+      setTransferError(error instanceof Error ? error.message : "Unable to import data.");
+    } finally {
+      setIsImporting(false);
+      setImportProgress(null);
+      event.target.value = "";
+    }
   };
 
   return (
@@ -236,6 +329,56 @@ export default function SettingsPage() {
           <p className="text-sm text-white/60">No folder selected yet.</p>
         )}
         {libraryError && <p className="text-sm text-red-400">{libraryError}</p>}
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-xl font-semibold">Data Transfer</h2>
+        <p className="text-sm text-white/70">
+          Export a full backup of your words, subtitles database, preferences, and last session.
+          Import merges with existing data; newer timestamps win for words and subtitle files, and
+          prefs from the backup override local settings. Media library folder access cannot be
+          exported; reselect it after import.
+        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={handleExportEverything}
+            disabled={isExporting}
+            className="rounded-md border border-white/20 bg-white/10 px-3 py-2 text-sm font-medium text-white transition hover:border-white/30 hover:bg-white/20 focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:border-white/10 disabled:text-white/40"
+          >
+            {isExporting ? "Exporting..." : "Export everything"}
+          </button>
+          <button
+            type="button"
+            onClick={() => importInputRef.current?.click()}
+            disabled={isImporting}
+            className="rounded-md border border-white/20 bg-white/10 px-3 py-2 text-sm font-medium text-white transition hover:border-white/30 hover:bg-white/20 focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:border-white/10 disabled:text-white/40"
+          >
+            {isImporting ? "Importing..." : "Import everything"}
+          </button>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".json"
+            className="hidden"
+            onChange={handleImportEverything}
+          />
+        </div>
+        {isImporting && importProgress ? (
+          <div className="mt-2 w-full">
+            <div className="h-1.5 w-full overflow-hidden rounded bg-white/10">
+              <div
+                className="h-full bg-emerald-400 transition-all duration-300"
+                style={{ width: `${importProgress.percent}%` }}
+              />
+            </div>
+            <p className="mt-1 text-xs text-white/60">
+              Importing: {importProgress.stage} ({Math.round(importProgress.percent)}%, {importElapsed}s)
+            </p>
+          </div>
+        ) : null}
+        {transferError && <p className="text-sm text-red-400">{transferError}</p>}
+        {transferSuccess && <p className="text-sm text-emerald-400">{transferSuccess}</p>}
       </section>
 
       <section className="space-y-2">

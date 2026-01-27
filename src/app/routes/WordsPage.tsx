@@ -1,20 +1,7 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ChangeEvent,
-} from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { UnknownWord } from "../../core/types";
-import {
-  useDictionaryStore,
-  type ImportedUnknownWord,
-} from "../../state/dictionaryStore";
-import {
-  getFrequencyRankForWord,
-  loadFrequencyRanks,
-} from "../../utils/frequencyRanks";
+import { useDictionaryStore } from "../../state/dictionaryStore";
+import { getFrequencyRankForWord, loadFrequencyRanks } from "../../utils/frequencyRanks";
 
 type SortField = "alphabetical" | "updatedAt" | "frequencyRank";
 type SortDirection = "asc" | "desc";
@@ -26,120 +13,6 @@ type ViewColumn =
   | "frequencyRank"
   | "updatedAt"
   | "actions";
-
-function toImportedWord(value: unknown): ImportedUnknownWord | null {
-  if (!value || typeof value !== "object") return null;
-  const record = value as Record<string, unknown>;
-  const normalized = typeof record.normalized === "string" ? record.normalized.trim() : "";
-  const stem = typeof record.stem === "string" ? record.stem.trim() : "";
-  if (!normalized || !stem) return null;
-
-  let createdAt: number | undefined;
-  if (typeof record.createdAt === "number") {
-    createdAt = record.createdAt;
-  } else if (typeof record.createdAt === "string" && record.createdAt.trim() !== "") {
-    const parsed = Number(record.createdAt);
-    if (Number.isFinite(parsed)) {
-      createdAt = parsed;
-    }
-  }
-
-  let updatedAt: number | undefined;
-  if (typeof record.updatedAt === "number") {
-    updatedAt = record.updatedAt;
-  } else if (typeof record.updatedAt === "string" && record.updatedAt.trim() !== "") {
-    const parsed = Number(record.updatedAt);
-    if (Number.isFinite(parsed)) {
-      updatedAt = parsed;
-    }
-  }
-
-  return {
-    id: typeof record.id === "string" && record.id.trim() ? record.id.trim() : undefined,
-    original:
-      typeof record.original === "string" && record.original.trim()
-        ? record.original.trim()
-        : undefined,
-    originalSentence:
-      typeof record.originalSentence === "string" && record.originalSentence.trim()
-        ? record.originalSentence.trim()
-        : undefined,
-    normalized,
-    stem,
-    createdAt,
-    updatedAt,
-  };
-}
-
-function parseJsonWordList(text: string): ImportedUnknownWord[] {
-  const data = JSON.parse(text);
-  if (!Array.isArray(data)) {
-    throw new Error("JSON file must contain an array of words.");
-  }
-  const words = data
-    .map((value) => toImportedWord(value))
-    .filter((word): word is ImportedUnknownWord => word !== null);
-  if (words.length === 0) {
-    throw new Error("No valid words found in the JSON file.");
-  }
-  return words;
-}
-
-function splitCsvLine(line: string): string[] {
-  const values: string[] = [];
-  let current = "";
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i += 1) {
-    const char = line[i];
-    if (char === "\"") {
-      if (inQuotes && line[i + 1] === "\"") {
-        current += "\"";
-        i += 1;
-      } else {
-        inQuotes = !inQuotes;
-      }
-    } else if (char === "," && !inQuotes) {
-      values.push(current);
-      current = "";
-    } else {
-      current += char;
-    }
-  }
-  values.push(current);
-  return values;
-}
-
-function parseCsvWordList(text: string): ImportedUnknownWord[] {
-  const lines = text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-  if (lines.length <= 1) {
-    throw new Error("CSV file must include a header row and at least one word.");
-  }
-  const headers = splitCsvLine(lines[0]).map((header) => header.trim());
-  const records: ImportedUnknownWord[] = [];
-
-  for (let index = 1; index < lines.length; index += 1) {
-    const rawLine = lines[index];
-    if (!rawLine) continue;
-    const values = splitCsvLine(rawLine);
-    const entry: Record<string, string> = {};
-    headers.forEach((header, headerIndex) => {
-      entry[header] = (values[headerIndex] ?? "").trim();
-    });
-    const word = toImportedWord(entry);
-    if (word) {
-      records.push(word);
-    }
-  }
-
-  if (records.length === 0) {
-    throw new Error("No valid rows found in the CSV file.");
-  }
-
-  return records;
-}
 
 interface WordRowProps {
   word: UnknownWord;
@@ -165,7 +38,7 @@ function WordRow({ word, frequencyRank, onDelete, visibleColumns }: WordRowProps
       {visibleColumns.stem && <td className="px-4 py-2 text-white/70">{word.stem}</td>}
       {visibleColumns.frequencyRank && (
         <td className="px-4 py-2 text-right text-white/70">
-          {typeof frequencyRank === "number" ? `#${frequencyRank.toLocaleString()}` : "—"}
+          {typeof frequencyRank === "number" ? `#${frequencyRank.toLocaleString()}` : "-"}
         </td>
       )}
       {visibleColumns.updatedAt && (
@@ -193,7 +66,6 @@ function WordRow({ word, frequencyRank, onDelete, visibleColumns }: WordRowProps
 export default function WordsPage() {
   const [importError, setImportError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
-  const [isImporting, setIsImporting] = useState(false);
   const [isLoadingRanks, setIsLoadingRanks] = useState(false);
   const [rankError, setRankError] = useState<string | null>(null);
   const [sortField, setSortField] = useState<SortField>("updatedAt");
@@ -208,13 +80,11 @@ export default function WordsPage() {
     updatedAt: true,
     actions: true,
   });
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [frequencyRanks, setFrequencyRanks] = useState<Map<string, number> | null>(null);
   const words = useDictionaryStore((state) => state.words);
   const initialized = useDictionaryStore((state) => state.initialized);
   const initialize = useDictionaryStore((state) => state.initialize);
   const removeWord = useDictionaryStore((state) => state.removeWord);
-  const importWords = useDictionaryStore((state) => state.importWords);
   const reanalyzeStems = useDictionaryStore((state) => state.reanalyzeStems);
 
   useEffect(() => {
@@ -287,20 +157,6 @@ export default function WordsPage() {
 
     return order;
   }, [ranksById, sortDirection, sortField, words]);
-
-  const handleExportJson = useCallback(() => {
-    const blob = new Blob([JSON.stringify(sorted, null, 2)], {
-      type: "application/json",
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `unknown-words-${new Date().toISOString().split("T")[0]}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  }, [sorted]);
 
   const handleCopyWords = useCallback(async () => {
     const text = sorted.map((word) => word.original).join("\n");
@@ -393,38 +249,6 @@ export default function WordsPage() {
     [sortField],
   );
 
-  const handleImport = useCallback(
-    async (event: ChangeEvent<HTMLInputElement>) => {
-      const files = event.target.files ? Array.from(event.target.files) : [];
-      if (files.length === 0) return;
-
-      setIsImporting(true);
-      setImportError(null);
-      setImportSuccess(null);
-
-      try {
-        let totalImported = 0;
-        for (const file of files) {
-          const text = await file.text();
-          const incoming = file.name.endsWith(".csv")
-            ? parseCsvWordList(text)
-            : parseJsonWordList(text);
-          await importWords(incoming);
-          totalImported += incoming.length;
-        }
-        setImportSuccess(
-          `Imported ${totalImported} word${totalImported === 1 ? "" : "s"}.`,
-        );
-      } catch (error) {
-        setImportError(error instanceof Error ? error.message : "Failed to import words.");
-      } finally {
-        setIsImporting(false);
-        event.target.value = "";
-      }
-    },
-    [importWords],
-  );
-
   const handleReanalyzeStems = useCallback(async () => {
     setIsReanalyzing(true);
     setImportError(null);
@@ -443,7 +267,7 @@ export default function WordsPage() {
     return (
       <div className="space-y-4">
         <h2 className="text-xl font-semibold">Unknown Words</h2>
-        <p className="text-sm text-white/60">Loading your saved vocabulary…</p>
+        <p className="text-sm text-white/60">Loading your saved vocabulary...</p>
       </div>
     );
   }
@@ -456,13 +280,6 @@ export default function WordsPage() {
           Click a word in the player to add it to your learning list.
         </p>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={handleExportJson}
-            className="rounded bg-white/10 px-3 py-1 text-xs font-medium text-white hover:bg-white/20"
-          >
-            Export JSON
-          </button>
           <button
             type="button"
             onClick={() => {
@@ -499,22 +316,6 @@ export default function WordsPage() {
           >
             {isReanalyzing ? "Re-analyzing…" : "Re-analyze"}
           </button>
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="rounded bg-white/10 px-3 py-1 text-xs font-medium text-white hover:bg-white/20"
-            disabled={isImporting}
-          >
-            Import List
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".json,.csv"
-            multiple
-            className="hidden"
-            onChange={handleImport}
-          />
         </div>
         {importError && <p className="text-xs text-red-400">{importError}</p>}
         {importSuccess && <p className="text-xs text-emerald-400">{importSuccess}</p>}
@@ -527,16 +328,9 @@ export default function WordsPage() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="text-xl font-semibold">Unknown Words</h2>
-          <p className="text-xs text-white/50">Export your list or prune items you no longer need.</p>
+          <p className="text-xs text-white/50">Review your list or prune items you no longer need.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={handleExportJson}
-            className="rounded bg-white/10 px-3 py-1 text-xs font-medium text-white hover:bg-white/20"
-          >
-            Export JSON
-          </button>
           <button
             type="button"
             onClick={() => {
@@ -571,24 +365,8 @@ export default function WordsPage() {
             className="rounded bg-white/10 px-3 py-1 text-xs font-medium text-white hover:bg-white/20 disabled:opacity-50"
             disabled={isReanalyzing}
           >
-            {isReanalyzing ? "Re-analyzing…" : "Re-analyze"}
+            {isReanalyzing ? "Re-analyzing..." : "Re-analyze"}
           </button>
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="rounded bg-white/10 px-3 py-1 text-xs font-medium text-white hover:bg-white/20 disabled:opacity-50"
-            disabled={isImporting}
-          >
-            {isImporting ? "Importing…" : "Import"}
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".json,.csv"
-            multiple
-            className="hidden"
-            onChange={handleImport}
-          />
         </div>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-white/60">
@@ -654,7 +432,7 @@ export default function WordsPage() {
           </details>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          {isLoadingRanks && <span>Loading frequency ranks…</span>}
+          {isLoadingRanks && <span>Loading frequency ranks...</span>}
           {rankError && <span className="text-amber-300">{rankError}</span>}
           {importError ? (
             <span className="text-red-400">{importError}</span>
