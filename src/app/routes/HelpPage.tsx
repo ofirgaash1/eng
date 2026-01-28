@@ -2,10 +2,25 @@ export default function HelpPage() {
   return (
     <div className="space-y-6 text-right text-sm text-white/80" dir="rtl">
       <section className="space-y-3">
-        <p>באתר הזה לומדים אנגלית.</p>
-        <p>
-          המטרה היא <strong>לשפר אוצר מילים</strong> דרך צפייה בסדרות וסרטים.
-        </p>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+          <div className="space-y-3 lg:flex-1">
+            <p>באתר הזה לומדים אנגלית.</p>
+            <p>
+              המטרה היא <strong>לשפר אוצר מילים</strong> דרך צפייה בסדרות וסרטים.
+            </p>
+          </div>
+          <div className="w-full overflow-hidden rounded-lg border border-white/10 bg-black/40 lg:w-[22rem]">
+            <div className="aspect-video w-full">
+              <iframe
+                className="h-full w-full"
+                src="https://www.youtube.com/embed/0n2JBXuHEoc"
+                title="Tutorial"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                allowFullScreen
+              />
+            </div>
+          </div>
+        </div>
       </section>
 
       <hr className="border-white/10" />
