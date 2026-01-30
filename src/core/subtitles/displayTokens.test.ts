@@ -115,21 +115,21 @@ describe("subtitle display tokens", () => {
     expect(tokens).not.toContain("?");
   });
 
-  it("keeps RTL periods attached to the following word across line breaks", () => {
+  it("keeps RTL periods attached to the preceding word across line breaks", () => {
     const rtlText = `62
 00:09:08,247 --> 00:09:11,751
 ובכן, אנחנו שומעים בקביעות
 .את השם הייזנברג`;
     const [cue] = parseSrt(rtlText);
-    const tokens = buildDisplayTokens(tokenizeWithItalics(cue.rawText), { isRtl: true }).map(
+    const tokens = buildDisplayTokens(tokenizeWithItalics(cue.rawText)).map(
       (token) => token.text,
     );
     expect(tokens).toEqual([
       "ובכן,",
       "אנחנו",
       "שומעים",
-      "בקביעות",
-      ".את",
+      "בקביעות.",
+      "את",
       "השם",
       "הייזנברג",
     ]);
