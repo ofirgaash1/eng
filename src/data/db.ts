@@ -80,3 +80,51 @@ export class SubtitleLearnerDB extends Dexie {
 }
 
 export const db = new SubtitleLearnerDB();
+
+let dbReadyPromise: Promise<boolean> | null = null;
+let dbReady = false;
+let dbUnavailable = false;
+
+export async function ensureDbReady(): Promise<boolean> {
+  if (dbReady) return true;
+  if (dbUnavailable) return false;
+  if (!dbReadyPromise) {
+    dbReadyPromise = db
+      .open()
+      .then(() => {
+        dbReady = true;
+        return true;
+      })
+      .catch(() => {
+        dbUnavailable = true;
+        return false;
+      });
+  }
+  return dbReadyPromise;
+}
+
+export async function withDb<T>(fallback: T, action: () => Promise<T>): Promise<T> {
+  const ready = await ensureDbReady();
+  if (!ready) return fallback;
+  try {
+    return await action();
+  } catch {
+    return fallback;
+  }
+}
+
+export async function withDbVoid(action: () => Promise<void>): Promise<void> {
+  const ready = await ensureDbReady();
+  if (!ready) return;
+  try {
+    await action();
+  } catch {
+    // Swallow DB errors to avoid uncaught promise rejections in constrained environments.
+  }
+}
+
+export function resetDbStateForTests(): void {
+  dbReadyPromise = null;
+  dbReady = false;
+  dbUnavailable = false;
+}
