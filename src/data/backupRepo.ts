@@ -6,7 +6,7 @@ import type {
   UnknownWord,
   UserPrefs,
 } from "../core/types";
-import { db } from "./db";
+import { db, ensureDbReady, withDb, withDbVoid } from "./db";
 
 const PREFS_ID = "prefs";
 
@@ -275,11 +275,11 @@ async function bulkPutChunked<T extends { id: string }>(
 
 export async function exportAllData(): Promise<{ payload: BackupPayload; counts: BackupCounts }> {
   const [words, subtitleFiles, subtitleCues, prefsRecord, sessions] = await Promise.all([
-    db.words.toArray(),
-    db.subtitleFiles.toArray(),
-    db.subtitleCues.toArray(),
-    db.prefs.get(PREFS_ID),
-    db.sessions.toArray(),
+    withDb([], () => db.words.toArray()),
+    withDb([], () => db.subtitleFiles.toArray()),
+    withDb([], () => db.subtitleCues.toArray()),
+    withDb(undefined, () => db.prefs.get(PREFS_ID)),
+    withDb([], () => db.sessions.toArray()),
   ]);
 
   const prefs = prefsRecord?.value ? stripPrefsForTransfer(prefsRecord.value) : undefined;
@@ -322,7 +322,18 @@ export async function importAllData(
   const data = extractBackupData(input);
 
   report(2, "Opening database");
-  await db.open();
+  const dbReady = await ensureDbReady();
+  if (!dbReady) {
+    return {
+      words: 0,
+      addedWords: 0,
+      subtitleFiles: 0,
+      addedSubtitleFiles: 0,
+      subtitleCues: 0,
+      sessions: 0,
+      hasPrefs: false,
+    };
+  }
 
   const words = ensureArray<UnknownWord>(data.words);
   const subtitleFiles = ensureArray<SubtitleFile>(data.subtitleFiles);
@@ -343,11 +354,11 @@ export async function importAllData(
   report(5, "Loading existing data");
   const [existingWords, existingSubtitleFiles, existingSubtitleCues, prefsRecord, existingSessions] =
     await Promise.all([
-      db.words.toArray(),
-      db.subtitleFiles.toArray(),
-      db.subtitleCues.toArray(),
-      db.prefs.get(PREFS_ID),
-      db.sessions.toArray(),
+      withDb([], () => db.words.toArray()),
+      withDb([], () => db.subtitleFiles.toArray()),
+      withDb([], () => db.subtitleCues.toArray()),
+      withDb(undefined, () => db.prefs.get(PREFS_ID)),
+      withDb([], () => db.sessions.toArray()),
     ]);
   const safeExistingSessions = existingSessions.map(stripSessionForTransfer);
 
@@ -387,42 +398,52 @@ export async function importAllData(
 
   if (mergedWords.length > 0) {
     reportWrite("Saving words");
-    await bulkPutChunked(db.words, mergedWords, 500, (count) =>
-      reportWrite("Saving words", count)
+    await withDbVoid(() =>
+      bulkPutChunked(db.words, mergedWords, 500, (count) =>
+        reportWrite("Saving words", count)
+      )
     );
   }
   if (mergedSubtitleFiles.length > 0) {
     reportWrite("Saving subtitle files");
-    await bulkPutChunked(db.subtitleFiles, mergedSubtitleFiles, 200, (count) =>
-      reportWrite("Saving subtitle files", count)
+    await withDbVoid(() =>
+      bulkPutChunked(db.subtitleFiles, mergedSubtitleFiles, 200, (count) =>
+        reportWrite("Saving subtitle files", count)
+      )
     );
   }
   if (mergedSubtitleCues.length > 0) {
     reportWrite("Saving subtitle cues");
-    await bulkPutChunked(db.subtitleCues, mergedSubtitleCues, 1000, (count) =>
-      reportWrite("Saving subtitle cues", count)
+    await withDbVoid(() =>
+      bulkPutChunked(db.subtitleCues, mergedSubtitleCues, 1000, (count) =>
+        reportWrite("Saving subtitle cues", count)
+      )
     );
   }
   if (mergedPrefs) {
     reportWrite("Saving preferences");
-    await db.prefs.put({ id: PREFS_ID, value: mergedPrefs, updatedAt: Date.now() });
+    await withDbVoid(() =>
+      db.prefs.put({ id: PREFS_ID, value: mergedPrefs, updatedAt: Date.now() })
+    );
     reportWrite("Saving preferences", 1);
   }
   if (mergedSessions.length > 0) {
     reportWrite("Saving sessions");
-    await bulkPutChunked(db.sessions, mergedSessions, 200, (count) =>
-      reportWrite("Saving sessions", count)
+    await withDbVoid(() =>
+      bulkPutChunked(db.sessions, mergedSessions, 200, (count) =>
+        reportWrite("Saving sessions", count)
+      )
     );
   }
 
   report(100, "Finalizing");
   const [finalWords, finalSubtitleFiles, finalSubtitleCues, finalSessions, finalPrefs] =
     await Promise.all([
-      db.words.count(),
-      db.subtitleFiles.count(),
-      db.subtitleCues.count(),
-      db.sessions.count(),
-      db.prefs.get(PREFS_ID),
+      withDb(0, () => db.words.count()),
+      withDb(0, () => db.subtitleFiles.count()),
+      withDb(0, () => db.subtitleCues.count()),
+      withDb(0, () => db.sessions.count()),
+      withDb(undefined, () => db.prefs.get(PREFS_ID)),
     ]);
 
   const hasSourceData =
