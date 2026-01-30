@@ -72,7 +72,7 @@ function useDisplayTokens(cue: Cue, isRtl: boolean) {
     }
     return tokens;
   }, [isRtl, tokens]);
-  return useMemo(() => buildDisplayTokens(normalizedTokens), [normalizedTokens]);
+  return useMemo(() => buildDisplayTokens(normalizedTokens, { isRtl }), [normalizedTokens, isRtl]);
 }
 
 export function SubtitleCue({
