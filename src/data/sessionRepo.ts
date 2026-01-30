@@ -1,10 +1,10 @@
 import type { RecentSessionRecord } from "../core/types";
-import { db } from "./db";
+import { db, withDb, withDbVoid } from "./db";
 
 const SESSION_ID = "last-session";
 
 export async function getLastSession(): Promise<RecentSessionRecord | undefined> {
-  return db.sessions.get(SESSION_ID);
+  return withDb(undefined, () => db.sessions.get(SESSION_ID));
 }
 
 export async function saveLastSession(
@@ -61,9 +61,9 @@ export async function saveLastSession(
     next.secondarySubtitleOffsetMs = updates.secondarySubtitleOffsetMs;
   }
 
-  await db.sessions.put(next);
+  await withDbVoid(() => db.sessions.put(next));
 }
 
 export async function clearLastSession(): Promise<void> {
-  await db.sessions.delete(SESSION_ID);
+  await withDbVoid(() => db.sessions.delete(SESSION_ID));
 }

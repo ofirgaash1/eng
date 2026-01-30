@@ -11,7 +11,7 @@ import { useDictionaryStore } from "../../state/dictionaryStore";
 import { usePrefsStore } from "../../state/prefsStore";
 import { listSubtitleFiles, upsertSubtitleFile, deleteSubtitleFile } from "../../data/filesRepo";
 import { getCuesForFile, saveCuesForFile } from "../../data/cuesRepo";
-import { hashBlob } from "../../utils/file";
+import { hashBlob, readSubtitleText } from "../../utils/file";
 import { tokenize } from "../../core/nlp/tokenize";
 import { parseSrt } from "../../core/parsing/srtParser";
 
@@ -387,7 +387,7 @@ export default function QuotesPage() {
             const hash = await hashBlob(file);
             let cues = await getCuesForFile(hash);
             if (!cues) {
-              const text = await file.text();
+              const text = await readSubtitleText(file);
               cues = await parseWithWorker(text);
               await saveCuesForFile(hash, cues);
             }
