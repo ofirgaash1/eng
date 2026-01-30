@@ -19,7 +19,7 @@ import {
 } from "../../core/subtitles/displayTokens";
 import { handlePlayerKeyDown } from "./playerShortcuts";
 import { formatTimeMs } from "../../utils/timeFormat";
-import { hashBlob } from "../../utils/file";
+import { hashBlob, readSubtitleText } from "../../utils/file";
 import { upsertSubtitleFile } from "../../data/filesRepo";
 import { getCuesForFile, saveCuesForFile } from "../../data/cuesRepo";
 import { getLastSession, saveLastSession } from "../../data/sessionRepo";
@@ -72,7 +72,7 @@ function useDisplayTokens(cue: Cue, isRtl: boolean) {
     }
     return tokens;
   }, [isRtl, tokens]);
-  return useMemo(() => buildDisplayTokens(normalizedTokens), [normalizedTokens]);
+  return useMemo(() => buildDisplayTokens(normalizedTokens, { isRtl }), [normalizedTokens, isRtl]);
 }
 
 export function SubtitleCue({
@@ -695,7 +695,7 @@ export default function PlayerPage() {
       setSubtitleError(null);
       setSubtitleLoading(true);
       setCurrentTimeMs(0);
-      const text = await file.text();
+      const text = await readSubtitleText(file);
       const hash = await hashBlob(file);
 
       setSubtitleName(file.name);
@@ -744,7 +744,7 @@ export default function PlayerPage() {
     async (file: File) => {
       setSecondarySubtitleError(null);
       setSecondarySubtitleLoading(true);
-      const text = await file.text();
+      const text = await readSubtitleText(file);
       const hash = await hashBlob(file);
 
       setSecondarySubtitleName(file.name);

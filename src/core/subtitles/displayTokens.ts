@@ -15,6 +15,7 @@ export type DisplayToken = {
 
 const NO_SPACE_BEFORE_RE = /^[\)\]\}»”’.,!?;:%…،؛؟。！？]+$/u;
 const NO_SPACE_AFTER_RE = /^[\(\[\{«“‘]+$/u;
+const RTL_PREFIX_PUNCT_RE = /^[.]+$/u;
 
 export function isWordLikeToken(token: Token): boolean {
   return token.isWord || /^\d+$/.test(token.text);
@@ -65,13 +66,29 @@ export function tokenizeWithItalics(text: string): StyledToken[] {
   return tokens;
 }
 
-export function buildDisplayTokens(tokens: StyledToken[]): DisplayToken[] {
+export function buildDisplayTokens(
+  tokens: StyledToken[],
+  options: { isRtl?: boolean } = {},
+): DisplayToken[] {
+  const { isRtl = false } = options;
   const displayTokens: DisplayToken[] = [];
   let prefix = "";
   let prefixItalic = false;
 
   tokens.forEach((token, index) => {
     const next = tokens[index + 1];
+
+    if (
+      isRtl &&
+      !token.token.isWord &&
+      RTL_PREFIX_PUNCT_RE.test(token.token.text) &&
+      next &&
+      isWordLikeToken(next.token)
+    ) {
+      prefix += token.token.text;
+      prefixItalic = prefixItalic || token.italic;
+      return;
+    }
 
     if (!token.token.isWord && isNoSpaceAfter(token.token) && next && isWordLikeToken(next.token)) {
       prefix += token.token.text;
