@@ -74,7 +74,7 @@ describe("subtitle display tokens", () => {
 ?האהובה על מר איגן
 `;
     const [cue] = parseSrt(rtlText);
-    const tokens = buildDisplayTokens(tokenizeWithItalics(cue.rawText)).map(
+    const tokens = buildDisplayTokens(tokenizeWithItalics(cue.rawText), { isRtl: true }).map(
       (token) => token.text,
     );
     expect(tokens).toEqual([
@@ -97,7 +97,7 @@ describe("subtitle display tokens", () => {
 מארק, אתה מוכן להניח
 ?את כרטיס המפתח שלך על שולחני`;
     const [cue] = parseSrt(rtlText);
-    const tokens = buildDisplayTokens(tokenizeWithItalics(cue.rawText)).map(
+    const tokens = buildDisplayTokens(tokenizeWithItalics(cue.rawText), { isRtl: true }).map(
       (token) => token.text,
     );
     expect(tokens).toEqual([
