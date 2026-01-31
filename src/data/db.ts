@@ -103,7 +103,7 @@ export async function ensureDbReady(): Promise<boolean> {
   return dbReadyPromise;
 }
 
-export async function withDb<T>(fallback: T, action: () => Promise<T>): Promise<T> {
+export async function withDb<T>(fallback: T, action: () => PromiseLike<T>): Promise<T> {
   const ready = await ensureDbReady();
   if (!ready) return fallback;
   try {
@@ -113,7 +113,7 @@ export async function withDb<T>(fallback: T, action: () => Promise<T>): Promise<
   }
 }
 
-export async function withDbVoid(action: () => Promise<void>): Promise<void> {
+export async function withDbVoid(action: () => PromiseLike<unknown> | void): Promise<void> {
   const ready = await ensureDbReady();
   if (!ready) return;
   try {

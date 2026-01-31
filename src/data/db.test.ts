@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { db, resetDbStateForTests, withDb, withDbVoid } from "./db";
 
 describe("db helpers", () => {
-  let errorSpy: ReturnType<typeof vi.spyOn>;
-  let warnSpy: ReturnType<typeof vi.spyOn>;
+  let errorSpy: MockInstance<[message?: unknown, ...optionalParams: unknown[]], void>;
+  let warnSpy: MockInstance<[message?: unknown, ...optionalParams: unknown[]], void>;
 
   beforeEach(() => {
     resetDbStateForTests();

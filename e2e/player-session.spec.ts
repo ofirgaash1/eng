@@ -16,6 +16,10 @@ test("video remains loaded after navigating to settings and back", async ({ page
   await expect(page.getByRole("heading", { name: "Subtitle Appearance" })).toBeVisible();
   await expect(page.getByText("Export everything")).toBeVisible();
 
+  await page.reload();
+  await page.waitForTimeout(500);
+  await expect(page.getByRole("heading", { name: "Subtitle Appearance" })).toBeVisible();
+
   await page.getByRole("link", { name: "Player" }).click();
   await page.waitForTimeout(500);
   await expect(videoLoadLabel).toBeVisible();
