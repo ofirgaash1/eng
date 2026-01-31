@@ -1644,7 +1644,6 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
                             className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:outline-none"
                             onClick={() => {
                               adjustSubtitleOffset(-500);
-                              focusPlayerContainer();
                             }}
                           >
                             –0.5s
@@ -1654,7 +1653,6 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
                             className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:outline-none"
                             onClick={() => {
                               adjustSubtitleOffset(500);
-                              focusPlayerContainer();
                             }}
                           >
                             +0.5s
@@ -1703,7 +1701,6 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
                             className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
                             onClick={() => {
                               adjustSecondarySubtitleOffset(-500);
-                              focusPlayerContainer();
                             }}
                             disabled={secondaryCues.length === 0}
                           >
@@ -1714,7 +1711,6 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
                             className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
                             onClick={() => {
                               adjustSecondarySubtitleOffset(500);
-                              focusPlayerContainer();
                             }}
                             disabled={secondaryCues.length === 0}
                           >
@@ -1764,7 +1760,6 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
                             className="rounded bg-white/10 px-2 py-1 text-xs font-medium text-white transition hover:bg-white/20 focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
                             onClick={() => {
                               toggleSecondarySubtitle();
-                              focusPlayerContainer();
                             }}
                             disabled={secondaryCues.length === 0}
                           >
