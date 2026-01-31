@@ -6,6 +6,7 @@ type PlayerShortcutHandlers = {
   togglePlayback: () => void;
   toggleSecondarySubtitle: () => void;
   stepVolume: (direction: "up" | "down") => void;
+  ignoreSecondarySubtitleShortcut?: boolean;
 };
 
 const INTERACTIVE_TAGS = ["INPUT", "TEXTAREA", "SELECT"];
@@ -80,7 +81,7 @@ export function handlePlayerKeyDown(
     toggleMute();
     return true;
   }
-  if (matchesShortcut(event, ["KeyH"], ["h", "H"])) {
+  if (!handlers.ignoreSecondarySubtitleShortcut && matchesShortcut(event, ["KeyH"], ["h", "H"])) {
     stopShortcutEvent(event);
     toggleSecondarySubtitle();
     return true;

@@ -10,7 +10,7 @@ import {
 import { useDictionaryStore } from "../../state/dictionaryStore";
 import { usePrefsStore } from "../../state/prefsStore";
 import { useSessionStore } from "../../state/sessionStore";
-import type { Cue, Token } from "../../core/types";
+import type { Cue, Token, UserPrefs } from "../../core/types";
 import { tokenize } from "../../core/nlp/tokenize";
 import {
   buildDisplayTokens,
@@ -59,6 +59,33 @@ type WorkerResponse = {
   cues: Cue[];
   error?: string;
 };
+
+type ShortcutAction = keyof NonNullable<UserPrefs["playerShortcuts"]>;
+
+const INTERACTIVE_TAGS = ["INPUT", "TEXTAREA", "SELECT", "BUTTON", "SUMMARY"];
+
+function isInteractiveTarget(target: EventTarget | null): boolean {
+  if (typeof HTMLElement === "undefined") return false;
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  return INTERACTIVE_TAGS.includes(target.tagName);
+}
+
+function formatShortcutLabel(event: KeyboardEvent): string {
+  if (event.key === " ") return "Space";
+  if (event.key === "Escape") return "Esc";
+  if (event.key.startsWith("Arrow")) return event.key.replace("Arrow", "Arrow ");
+  if (event.key.length === 1) return event.key.toUpperCase();
+  return event.key;
+}
+
+function stopShortcutEvent(event: KeyboardEvent) {
+  event.preventDefault();
+  event.stopPropagation();
+  if (typeof event.stopImmediatePropagation === "function") {
+    event.stopImmediatePropagation();
+  }
+}
 
 function useDisplayTokens(cue: Cue, isRtl: boolean) {
   const tokens = useMemo(() => tokenizeWithItalics(cue.rawText), [cue.rawText]);
@@ -189,11 +216,15 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [volume, setVolume] = useState<number>(1);
+  const [volumeOverlayPercent, setVolumeOverlayPercent] = useState<number | null>(null);
   const [durationMs, setDurationMs] = useState<number | null>(null);
   const [showControls, setShowControls] = useState<boolean>(true);
   const [showCursor, setShowCursor] = useState<boolean>(true);
+  const [skipSubtitleGaps, setSkipSubtitleGaps] = useState<boolean>(false);
+  const [listeningShortcut, setListeningShortcut] = useState<ShortcutAction | null>(null);
   const hideControlsTimeoutRef = useRef<number | null>(null);
   const hideCursorTimeoutRef = useRef<number | null>(null);
+  const volumeOverlayTimeoutRef = useRef<number | null>(null);
   const lastVideoTimeSavedRef = useRef<number>(0);
   const addWord = useDictionaryStore((state) => state.addUnknownWordFromToken);
   const classForToken = useDictionaryStore((state) => state.classForToken);
@@ -202,6 +233,8 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
   const initializePrefs = usePrefsStore((state) => state.initialize);
   const prefsInitialized = usePrefsStore((state) => state.initialized);
   const setLastOpened = usePrefsStore((state) => state.setLastOpened);
+  const playerShortcuts = usePrefsStore((state) => state.prefs.playerShortcuts);
+  const updatePlayerShortcuts = usePrefsStore((state) => state.updatePlayerShortcuts);
 
   const handleTokenClick = useCallback(
     (token: Token, cue: Cue) => {
@@ -217,6 +250,16 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
     },
     [addWord],
   );
+
+  const showVolumeOverlay = useCallback((nextPercent: number) => {
+    setVolumeOverlayPercent(nextPercent);
+    if (volumeOverlayTimeoutRef.current !== null) {
+      window.clearTimeout(volumeOverlayTimeoutRef.current);
+    }
+    volumeOverlayTimeoutRef.current = window.setTimeout(() => {
+      setVolumeOverlayPercent(null);
+    }, 500);
+  }, []);
 
   const applyPrimaryCuesState = useCallback((nextCues: Cue[]) => {
     setCues(nextCues);
@@ -417,6 +460,9 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
 
       if (session.subtitleName) {
         setSubtitleName(session.subtitleName);
+      }
+      if (typeof session.subtitleOffsetMs === "number") {
+        setSubtitleOffsetMs(session.subtitleOffsetMs);
       }
       if (typeof session.videoTimeSeconds === "number") {
         setSavedVideoTime(session.videoTimeSeconds);
@@ -741,7 +787,8 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
       video.muted = false;
     }
     setVolume(nextVolume);
-  }, []);
+    showVolumeOverlay(nextPercent);
+  }, [showVolumeOverlay]);
 
   const processSubtitleFile = useCallback(
     async (file: File) => {
@@ -916,7 +963,16 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
   const handleTimeUpdate = () => {
     const video = videoRef.current;
     if (!video) return;
-    setCurrentTimeMs(video.currentTime * 1000);
+    const nextTimeMs = video.currentTime * 1000;
+    if (skipSubtitleGaps && !video.paused) {
+      const jumpTarget = findGapJumpTargetMs(nextTimeMs);
+      if (jumpTarget !== null) {
+        video.currentTime = jumpTarget / 1000;
+        setCurrentTimeMs(jumpTarget);
+        return;
+      }
+    }
+    setCurrentTimeMs(nextTimeMs);
     if (video.currentTime - lastVideoTimeSavedRef.current >= 2) {
       lastVideoTimeSavedRef.current = video.currentTime;
       void saveLastSession({ videoTimeSeconds: video.currentTime });
@@ -953,9 +1009,75 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
     return Math.min(100, Math.max(0, (currentTimeMs / durationMs) * 100));
   }, [currentTimeMs, durationMs]);
 
-  const adjustSubtitleOffset = useCallback((deltaMs: number) => {
-    setSubtitleOffsetMs((previous) => previous + deltaMs);
+  const findNextCueStartMs = useCallback(
+    (timeMs: number) => {
+      for (const cue of cues) {
+        const adjustedStart = cue.startMs + subtitleOffsetMs;
+        if (adjustedStart > timeMs + 50) {
+          return Math.max(0, adjustedStart);
+        }
+      }
+      return null;
+    },
+    [cues, subtitleOffsetMs],
+  );
+
+  const findPreviousCueStartMs = useCallback(
+    (timeMs: number) => {
+      for (let index = cues.length - 1; index >= 0; index -= 1) {
+        const cue = cues[index];
+        const adjustedStart = cue.startMs + subtitleOffsetMs;
+        if (adjustedStart < timeMs - 50) {
+          return Math.max(0, adjustedStart);
+        }
+      }
+      return null;
+    },
+    [cues, subtitleOffsetMs],
+  );
+
+  const findGapJumpTargetMs = useCallback(
+    (timeMs: number) => {
+      let previousEnd: number | null = null;
+      for (const cue of cues) {
+        const adjustedStart = cue.startMs + subtitleOffsetMs;
+        const adjustedEnd = cue.endMs + subtitleOffsetMs;
+        if (timeMs >= adjustedStart && timeMs <= adjustedEnd) {
+          return null;
+        }
+        if (adjustedStart > timeMs) {
+          if (previousEnd === null) {
+            return adjustedStart - timeMs > 150 ? Math.max(0, adjustedStart) : null;
+          }
+          return timeMs - previousEnd > 150 ? Math.max(0, adjustedStart) : null;
+        }
+        previousEnd = adjustedEnd;
+      }
+      return null;
+    },
+    [cues, subtitleOffsetMs],
+  );
+
+  const jumpToMs = useCallback((targetMs: number, options: { focus?: boolean } = {}) => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.currentTime = targetMs / 1000;
+    setCurrentTimeMs(targetMs);
+    if (options.focus !== false) {
+      playerContainerRef.current?.focus();
+    }
   }, []);
+
+  const adjustSubtitleOffset = useCallback(
+    (deltaMs: number) => {
+      setSubtitleOffsetMs((previous) => {
+        const next = previous + deltaMs;
+        void saveLastSession({ subtitleOffsetMs: next });
+        return next;
+      });
+    },
+    [],
+  );
 
   const adjustSecondarySubtitleOffset = useCallback((deltaMs: number) => {
     setSecondarySubtitleOffsetMs((previous) => {
@@ -973,6 +1095,27 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
       return next;
     });
   }, [secondaryCues.length]);
+
+  const jumpToNextSentence = useCallback(() => {
+    const nextStart = findNextCueStartMs(currentTimeMs);
+    if (nextStart === null) return;
+    jumpToMs(nextStart);
+  }, [currentTimeMs, findNextCueStartMs, jumpToMs]);
+
+  const jumpToPreviousSentence = useCallback(() => {
+    const prevStart = findPreviousCueStartMs(currentTimeMs);
+    if (prevStart === null) return;
+    jumpToMs(prevStart);
+  }, [currentTimeMs, findPreviousCueStartMs, jumpToMs]);
+
+  const nextSentenceStart = useMemo(
+    () => findNextCueStartMs(currentTimeMs),
+    [currentTimeMs, findNextCueStartMs],
+  );
+  const prevSentenceStart = useMemo(
+    () => findPreviousCueStartMs(currentTimeMs),
+    [currentTimeMs, findPreviousCueStartMs],
+  );
 
   const focusPlayerContainer = useCallback(() => {
     playerContainerRef.current?.focus();
@@ -1023,9 +1166,118 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
     showCursorNow();
   }, [showControlsNow, showCursorNow]);
 
+  const shortcutBindings = useMemo(() => playerShortcuts ?? {}, [playerShortcuts]);
+
+  const handleShortcutEditToggle = useCallback((action: ShortcutAction) => {
+    setListeningShortcut((previous) => (previous === action ? null : action));
+  }, []);
+
+  const getShortcutLabel = useCallback(
+    (action: ShortcutAction) =>
+      listeningShortcut === action ? "Press a key…" : shortcutBindings[action]?.label ?? "None",
+    [listeningShortcut, shortcutBindings],
+  );
+
+  useEffect(() => {
+    if (!listeningShortcut) return;
+    const handleShortcutCapture = (event: KeyboardEvent) => {
+      if (event.altKey || event.ctrlKey || event.metaKey) return;
+      stopShortcutEvent(event);
+      if (event.key === "Escape") {
+        setListeningShortcut(null);
+        return;
+      }
+      if (event.key === "Backspace" || event.key === "Delete") {
+        const updates: Partial<NonNullable<UserPrefs["playerShortcuts"]>> = {
+          [listeningShortcut]: undefined,
+        };
+        void updatePlayerShortcuts(updates);
+        setListeningShortcut(null);
+        return;
+      }
+      if (event.key === "Shift" || event.key === "Alt" || event.key === "Control" || event.key === "Meta") {
+        return;
+      }
+      const updates: Partial<NonNullable<UserPrefs["playerShortcuts"]>> = {
+        [listeningShortcut]: { code: event.code, label: formatShortcutLabel(event) },
+      };
+      void updatePlayerShortcuts(updates);
+      setListeningShortcut(null);
+    };
+    document.addEventListener("keydown", handleShortcutCapture, true);
+    return () => {
+      document.removeEventListener("keydown", handleShortcutCapture, true);
+    };
+  }, [listeningShortcut, updatePlayerShortcuts]);
+
+  const handleCustomShortcutKeyDown = useCallback(
+    (event: KeyboardEvent) => {
+      if (listeningShortcut) return false;
+      if (isInteractiveTarget(event.target)) return false;
+      if (event.altKey || event.ctrlKey || event.metaKey) return false;
+      const handlers: Partial<Record<ShortcutAction, () => void>> = {
+        mainSubtitleOffsetBack: () => {
+          adjustSubtitleOffset(-500);
+        },
+        mainSubtitleOffsetForward: () => {
+          adjustSubtitleOffset(500);
+        },
+        secondarySubtitleOffsetBack: () => {
+          adjustSecondarySubtitleOffset(-500);
+        },
+        secondarySubtitleOffsetForward: () => {
+          adjustSecondarySubtitleOffset(500);
+        },
+        toggleSecondarySubtitle: () => {
+          toggleSecondarySubtitle();
+        },
+        jumpNextSentence: () => {
+          jumpToNextSentence();
+        },
+        jumpPrevSentence: () => {
+          jumpToPreviousSentence();
+        },
+        toggleMainSubtitleRtl: () => {
+          setIsSubtitleRtl((previous) => !previous);
+        },
+        toggleSecondarySubtitleRtl: () => {
+          setIsSecondarySubtitleRtl((previous) => !previous);
+        },
+        toggleSkipSubtitleGaps: () => {
+          setSkipSubtitleGaps((previous) => !previous);
+        },
+      };
+      for (const [action, handler] of Object.entries(handlers) as [
+        ShortcutAction,
+        () => void,
+      ][]) {
+        const binding = shortcutBindings[action];
+        if (binding && binding.code === event.code) {
+          stopShortcutEvent(event);
+          handler();
+          focusPlayerContainer();
+          return true;
+        }
+      }
+      return false;
+    },
+    [
+      adjustSecondarySubtitleOffset,
+      adjustSubtitleOffset,
+      focusPlayerContainer,
+      jumpToNextSentence,
+      jumpToPreviousSentence,
+      listeningShortcut,
+      shortcutBindings,
+      toggleSecondarySubtitle,
+    ],
+  );
+
   const handleShortcutKeyDown = useCallback(
-    (event: KeyboardEvent) =>
-      handlePlayerKeyDown(event, {
+    (event: KeyboardEvent) => {
+      const customHandled = handleCustomShortcutKeyDown(event);
+      if (customHandled) return true;
+      return handlePlayerKeyDown(event, {
         video: videoRef.current,
         seekBy,
         toggleFullscreen,
@@ -1033,8 +1285,19 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
         togglePlayback,
         toggleSecondarySubtitle,
         stepVolume,
-      }),
-    [seekBy, stepVolume, toggleFullscreen, toggleMute, togglePlayback, toggleSecondarySubtitle],
+        ignoreSecondarySubtitleShortcut: Boolean(shortcutBindings.toggleSecondarySubtitle),
+      });
+    },
+    [
+      handleCustomShortcutKeyDown,
+      seekBy,
+      shortcutBindings,
+      stepVolume,
+      toggleFullscreen,
+      toggleMute,
+      togglePlayback,
+      toggleSecondarySubtitle,
+    ],
   );
 
   const handleShortcutKeyDownCapture = useCallback(
@@ -1089,8 +1352,16 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
     };
   }, [clearHideControlsTimeout, clearHideCursorTimeout]);
 
+  useEffect(() => {
+    return () => {
+      if (volumeOverlayTimeoutRef.current !== null) {
+        window.clearTimeout(volumeOverlayTimeoutRef.current);
+      }
+    };
+  }, []);
+
   return (
-    <div className="grid gap-6 lg:grid-cols-[2fr,1fr]" onKeyDown={handleShortcutKeyDownCapture}>
+    <div className="space-y-6" onKeyDown={handleShortcutKeyDownCapture}>
       <section className="space-y-4">
         <div
           ref={playerContainerRef}
@@ -1121,6 +1392,16 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
           >
             <track kind="subtitles" srcLang="en" label={subtitleName || "Subtitles"} />
           </video>
+          <div
+            className={`pointer-events-none absolute inset-0 z-40 flex items-center justify-center transition-opacity duration-300 ${
+              volumeOverlayPercent === null ? "opacity-0" : "opacity-100"
+            }`}
+            aria-hidden
+          >
+            <div className="rounded-full bg-black/50 px-4 py-2 text-lg font-semibold text-white/90 shadow-lg backdrop-blur-sm">
+              {(volumeOverlayPercent ?? Math.round(volume * 100))}%
+            </div>
+          </div>
           <div
             className={`absolute inset-x-0 bottom-0 z-20 flex flex-col gap-3 bg-gradient-to-t from-black/80 via-black/40 to-transparent px-4 pb-4 pt-6 text-white transition-opacity duration-300 ${
               showControls ? "opacity-100" : "pointer-events-none opacity-0"
@@ -1211,28 +1492,6 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
                       <span aria-hidden>⛶</span>
                       <span className="player-tooltip">F</span>
                     </button>
-                    <button
-                      type="button"
-                      className="group player-icon-button text-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
-                      onClick={() => {
-                        seekBy(-5);
-                        focusPlayerContainer();
-                      }}
-                      aria-label="Seek backward 5 seconds"
-                    >
-                      -5s <span className="player-tooltip">←</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="group player-icon-button text-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
-                      onClick={() => {
-                        seekBy(5);
-                        focusPlayerContainer();
-                      }}
-                      aria-label="Seek forward 5 seconds"
-                    >
-                      +5s <span className="player-tooltip">→</span>
-                    </button>
                   </div>
                 </div>
               </div>
@@ -1317,90 +1576,33 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
             </>
           )}
         </div>
-        <div className="flex flex-wrap items-center gap-3 rounded-lg bg-white/5 p-3 text-sm text-white/80">
-          <span className="font-medium text-white">Subtitle timing</span>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:outline-none"
-              onClick={() => {
-                adjustSubtitleOffset(-500);
-                focusPlayerContainer();
-              }}
-            >
-              –0.5s
-            </button>
-            <button
-              type="button"
-              className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:outline-none"
-              onClick={() => {
-                adjustSubtitleOffset(500);
-                focusPlayerContainer();
-              }}
-            >
-              +0.5s
-            </button>
-          </div>
-          <span className="text-xs text-white/60">
-            Offset: {subtitleOffsetMs >= 0 ? "+" : ""}
-            {(subtitleOffsetMs / 1000).toFixed(1)}s
-          </span>
-        </div>
-        <label className="flex w-full cursor-pointer flex-col gap-2 rounded-lg border border-dashed border-white/20 bg-white/5 p-4 text-sm hover:border-white/40">
-          <span className="font-medium">Load video</span>
-          <input
-            type="file"
-            accept="video/*,video/x-matroska,.mkv,.MKV"
-            multiple
-            className="hidden"
-            onChange={handleVideoUpload}
-          />
-          <span className="text-xs text-white/60">Automatically pairs a matching .srt when selected together.</span>
-          <span className="text-xs text-white/60">Current: {videoName || "None"}</span>
-        </label>
-        <label className="flex w-full cursor-pointer flex-col gap-2 rounded-lg border border-dashed border-white/20 bg-white/5 p-4 text-sm hover:border-white/40">
-          <span className="font-medium">Load subtitles (SRT)</span>
-          <input type="file" accept=".srt" className="hidden" onChange={handleSubtitleUpload} />
-          <span className="text-xs text-white/60">Current: {subtitleName || "None"}</span>
-          {subtitleLoading && (
-            <span className="text-xs text-amber-300">Processing subtitles…</span>
-          )}
-          {subtitleError && (
-            <span className="text-xs text-red-400">{subtitleError}</span>
-          )}
-        </label>
-        <label className="flex items-center gap-2 text-xs text-white/70">
-          <input
-            type="checkbox"
-            checked={isSubtitleRtl}
-            onChange={(event) => setIsSubtitleRtl(event.target.checked)}
-            className="h-3 w-3 rounded border-white/30 bg-slate-900"
-          />
-          Right-to-left order
-        </label>
-        <details className="rounded-lg border border-white/10 bg-white/5 p-4 text-sm">
-          <summary className="cursor-pointer list-none font-medium text-white/90">
-            Second subtitles (optional)
-          </summary>
-          <div className="mt-3 space-y-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                className="rounded bg-white/10 px-2 py-1 text-xs font-medium text-white transition hover:bg-white/20 focus:outline-none focus-visible:outline-none"
-                onClick={() => {
-                  toggleSecondarySubtitle();
-                  focusPlayerContainer();
-                }}
-                disabled={secondaryCues.length === 0}
-              >
-                {secondarySubtitleEnabled ? "On" : "Off"}
-              </button>
+        <div className="space-y-4 rounded-lg border border-white/10 bg-white/5 p-4 text-sm text-white/80">
+          <div className="grid gap-3 md:grid-cols-3">
+            <label className="flex w-full cursor-pointer flex-col gap-2 rounded-lg border border-dashed border-white/20 bg-white/5 p-4 text-sm hover:border-white/40">
+              <span className="font-medium">Load video</span>
+              <input
+                type="file"
+                accept="video/*,video/x-matroska,.mkv,.MKV"
+                multiple
+                className="hidden"
+                onChange={handleVideoUpload}
+              />
               <span className="text-xs text-white/60">
-                Shows a second line at the top. Shortcut: H/י
+                Automatically pairs a matching .srt when selected together.
               </span>
-            </div>
-            <label className="flex w-full cursor-pointer flex-col gap-2 rounded-lg border border-dashed border-white/20 bg-white/5 p-3 text-xs hover:border-white/40">
-              <span className="font-medium text-sm">Load second subtitles (SRT)</span>
+              <span className="text-xs text-white/60">Current: {videoName || "None"}</span>
+            </label>
+            <label className="flex w-full cursor-pointer flex-col gap-2 rounded-lg border border-dashed border-white/20 bg-white/5 p-4 text-sm hover:border-white/40">
+              <span className="font-medium">Load subtitles (SRT)</span>
+              <input type="file" accept=".srt" className="hidden" onChange={handleSubtitleUpload} />
+              <span className="text-xs text-white/60">Current: {subtitleName || "None"}</span>
+              {subtitleLoading && (
+                <span className="text-xs text-amber-300">Processing subtitles…</span>
+              )}
+              {subtitleError && <span className="text-xs text-red-400">{subtitleError}</span>}
+            </label>
+            <label className="flex w-full cursor-pointer flex-col gap-2 rounded-lg border border-dashed border-white/20 bg-white/5 p-4 text-sm hover:border-white/40">
+              <span className="font-medium">Load second subtitles (SRT, optional)</span>
               <input
                 type="file"
                 accept=".srt"
@@ -1417,76 +1619,343 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
                 <span className="text-xs text-red-400">{secondarySubtitleError}</span>
               )}
             </label>
-            <label className="flex items-center gap-2 text-xs text-white/70">
-              <input
-                type="checkbox"
-                checked={isSecondarySubtitleRtl}
-                onChange={(event) => setIsSecondarySubtitleRtl(event.target.checked)}
-                className="h-3 w-3 rounded border-white/30 bg-slate-900"
-              />
-              Right-to-left order
-            </label>
-            <div className="flex flex-wrap items-center gap-3 rounded-lg bg-white/5 p-2 text-xs text-white/80">
-              <span className="font-medium text-white">Second subtitle timing</span>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:outline-none"
-                  onClick={() => {
-                    adjustSecondarySubtitleOffset(-500);
-                    focusPlayerContainer();
-                  }}
-                >
-                  –0.5s
-                </button>
-                <button
-                  type="button"
-                  className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:outline-none"
-                  onClick={() => {
-                    adjustSecondarySubtitleOffset(500);
-                    focusPlayerContainer();
-                  }}
-                >
-                  +0.5s
-                </button>
-              </div>
-              <span className="text-xs text-white/60">
-                Offset: {secondarySubtitleOffsetMs >= 0 ? "+" : ""}
-                {(secondarySubtitleOffsetMs / 1000).toFixed(1)}s
-              </span>
-            </div>
           </div>
-        </details>
-      </section>
-      <aside className="space-y-4">
-        <div className="rounded-lg bg-black/40 p-4">
-          <h2 className="text-lg font-semibold">Active Cue</h2>
-          {subtitleLoading ? (
-            <p className="mt-3 text-sm text-white/60">Processing subtitles…</p>
-          ) : activeCues.length > 0 ? (
-            <div className="mt-3 space-y-2 text-sm">
-              {activeCues.map((cue) => (
-                <div key={`${cue.startMs}-${cue.endMs}`} className="space-y-2">
-                  <div className="text-white/60">
-                    {formatTimeMs(Math.max(0, cue.startMs + subtitleOffsetMs))} – {formatTimeMs(
-                      Math.max(0, cue.endMs + subtitleOffsetMs),
-                    )}
-                  </div>
-                  <SubtitleCue
-                    cue={cue}
-                    classForToken={classForToken}
-                    onTokenClick={handleTokenClick}
-                    onTokenContextMenu={handleTokenContextMenu}
-                    isRtl={isSubtitleRtl}
-                  />
-                </div>
-              ))}
+          <details className="rounded-lg border border-white/10 bg-white/5 p-4 text-sm">
+            <summary className="cursor-pointer list-none font-medium text-white/90">
+              More controls & keyboard shortcuts
+            </summary>
+            <div className="mt-4 space-y-3 text-xs text-white/70">
+              <p className="text-xs text-white/60">
+                Click a shortcut badge, then press a key. Press Backspace/Delete to clear.
+              </p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-white/80">
+                  <thead className="text-[11px] uppercase tracking-wide text-white/50">
+                    <tr>
+                      <th className="py-2 pr-4">Function</th>
+                      <th className="py-2 text-right sm:text-left">Shortcut (click to change)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/10">
+                    <tr>
+                      <td className="py-3 pr-4">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium text-white">Main subtitles timing</span>
+                          <button
+                            type="button"
+                            className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:outline-none"
+                            onClick={() => {
+                              adjustSubtitleOffset(-500);
+                            }}
+                          >
+                            –0.5s
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:outline-none"
+                            onClick={() => {
+                              adjustSubtitleOffset(500);
+                            }}
+                          >
+                            +0.5s
+                          </button>
+                          <span className="text-xs text-white/60">
+                            Offset: {subtitleOffsetMs >= 0 ? "+" : ""}
+                            {(subtitleOffsetMs / 1000).toFixed(1)}s
+                          </span>
+                        </div>
+                      </td>
+                      <td className="py-3">
+                        <div className="flex flex-wrap items-center justify-end gap-2 sm:justify-start">
+                          <button
+                            type="button"
+                            className={`rounded border border-white/10 px-2 py-1 transition ${
+                              listeningShortcut === "mainSubtitleOffsetBack"
+                                ? "bg-sky-500/20 text-white"
+                                : "bg-white/10 text-white/80 hover:bg-white/20"
+                            }`}
+                            onClick={() => handleShortcutEditToggle("mainSubtitleOffsetBack")}
+                            aria-pressed={listeningShortcut === "mainSubtitleOffsetBack"}
+                          >
+                            {getShortcutLabel("mainSubtitleOffsetBack")}
+                          </button>
+                          <button
+                            type="button"
+                            className={`rounded border border-white/10 px-2 py-1 transition ${
+                              listeningShortcut === "mainSubtitleOffsetForward"
+                                ? "bg-sky-500/20 text-white"
+                                : "bg-white/10 text-white/80 hover:bg-white/20"
+                            }`}
+                            onClick={() => handleShortcutEditToggle("mainSubtitleOffsetForward")}
+                            aria-pressed={listeningShortcut === "mainSubtitleOffsetForward"}
+                          >
+                            {getShortcutLabel("mainSubtitleOffsetForward")}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="py-3 pr-4">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium text-white">Second subtitles timing</span>
+                          <button
+                            type="button"
+                            className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                            onClick={() => {
+                              adjustSecondarySubtitleOffset(-500);
+                            }}
+                            disabled={secondaryCues.length === 0}
+                          >
+                            –0.5s
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                            onClick={() => {
+                              adjustSecondarySubtitleOffset(500);
+                            }}
+                            disabled={secondaryCues.length === 0}
+                          >
+                            +0.5s
+                          </button>
+                          <span className="text-xs text-white/60">
+                            Offset: {secondarySubtitleOffsetMs >= 0 ? "+" : ""}
+                            {(secondarySubtitleOffsetMs / 1000).toFixed(1)}s
+                          </span>
+                        </div>
+                      </td>
+                      <td className="py-3">
+                        <div className="flex flex-wrap items-center justify-end gap-2 sm:justify-start">
+                          <button
+                            type="button"
+                            className={`rounded border border-white/10 px-2 py-1 transition ${
+                              listeningShortcut === "secondarySubtitleOffsetBack"
+                                ? "bg-sky-500/20 text-white"
+                                : "bg-white/10 text-white/80 hover:bg-white/20"
+                            }`}
+                            onClick={() => handleShortcutEditToggle("secondarySubtitleOffsetBack")}
+                            aria-pressed={listeningShortcut === "secondarySubtitleOffsetBack"}
+                          >
+                            {getShortcutLabel("secondarySubtitleOffsetBack")}
+                          </button>
+                          <button
+                            type="button"
+                            className={`rounded border border-white/10 px-2 py-1 transition ${
+                              listeningShortcut === "secondarySubtitleOffsetForward"
+                                ? "bg-sky-500/20 text-white"
+                                : "bg-white/10 text-white/80 hover:bg-white/20"
+                            }`}
+                            onClick={() => handleShortcutEditToggle("secondarySubtitleOffsetForward")}
+                            aria-pressed={listeningShortcut === "secondarySubtitleOffsetForward"}
+                          >
+                            {getShortcutLabel("secondarySubtitleOffsetForward")}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="py-3 pr-4">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium text-white">Second subtitles visible</span>
+                          <button
+                            type="button"
+                            className="rounded bg-white/10 px-2 py-1 text-xs font-medium text-white transition hover:bg-white/20 focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                            onClick={() => {
+                              toggleSecondarySubtitle();
+                            }}
+                            disabled={secondaryCues.length === 0}
+                          >
+                            {secondarySubtitleEnabled ? "On" : "Off"}
+                          </button>
+                        </div>
+                      </td>
+                      <td className="py-3">
+                        <div className="flex flex-wrap items-center justify-end gap-2 sm:justify-start">
+                          <button
+                            type="button"
+                            className={`rounded border border-white/10 px-2 py-1 transition ${
+                              listeningShortcut === "toggleSecondarySubtitle"
+                                ? "bg-sky-500/20 text-white"
+                                : "bg-white/10 text-white/80 hover:bg-white/20"
+                            }`}
+                            onClick={() => handleShortcutEditToggle("toggleSecondarySubtitle")}
+                            aria-pressed={listeningShortcut === "toggleSecondarySubtitle"}
+                          >
+                            {getShortcutLabel("toggleSecondarySubtitle")}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="py-3 pr-4">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-white">
+                            Main subtitles right-to-left order
+                          </span>
+                          <input
+                            type="checkbox"
+                            checked={isSubtitleRtl}
+                            onChange={(event) => setIsSubtitleRtl(event.target.checked)}
+                            className="h-3 w-3 rounded border-white/30 bg-slate-900"
+                          />
+                        </div>
+                      </td>
+                      <td className="py-3">
+                        <div className="flex flex-wrap items-center justify-end gap-2 sm:justify-start">
+                          <button
+                            type="button"
+                            className={`rounded border border-white/10 px-2 py-1 transition ${
+                              listeningShortcut === "toggleMainSubtitleRtl"
+                                ? "bg-sky-500/20 text-white"
+                                : "bg-white/10 text-white/80 hover:bg-white/20"
+                            }`}
+                            onClick={() => handleShortcutEditToggle("toggleMainSubtitleRtl")}
+                            aria-pressed={listeningShortcut === "toggleMainSubtitleRtl"}
+                          >
+                            {getShortcutLabel("toggleMainSubtitleRtl")}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="py-3 pr-4">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-white">
+                            Second subtitles right-to-left order
+                          </span>
+                          <input
+                            type="checkbox"
+                            checked={isSecondarySubtitleRtl}
+                            onChange={(event) => setIsSecondarySubtitleRtl(event.target.checked)}
+                            className="h-3 w-3 rounded border-white/30 bg-slate-900"
+                          />
+                        </div>
+                      </td>
+                      <td className="py-3">
+                        <div className="flex flex-wrap items-center justify-end gap-2 sm:justify-start">
+                          <button
+                            type="button"
+                            className={`rounded border border-white/10 px-2 py-1 transition ${
+                              listeningShortcut === "toggleSecondarySubtitleRtl"
+                                ? "bg-sky-500/20 text-white"
+                                : "bg-white/10 text-white/80 hover:bg-white/20"
+                            }`}
+                            onClick={() => handleShortcutEditToggle("toggleSecondarySubtitleRtl")}
+                            aria-pressed={listeningShortcut === "toggleSecondarySubtitleRtl"}
+                          >
+                            {getShortcutLabel("toggleSecondarySubtitleRtl")}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="py-3 pr-4">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium text-white">Jump to next sentence</span>
+                          <button
+                            type="button"
+                            className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                            onClick={() => {
+                              const nextStart = findNextCueStartMs(currentTimeMs);
+                              if (nextStart === null) return;
+                              jumpToMs(nextStart, { focus: false });
+                            }}
+                            disabled={nextSentenceStart === null}
+                          >
+                            Next
+                          </button>
+                        </div>
+                      </td>
+                      <td className="py-3">
+                        <div className="flex flex-wrap items-center justify-end gap-2 sm:justify-start">
+                          <button
+                            type="button"
+                            className={`rounded border border-white/10 px-2 py-1 transition ${
+                              listeningShortcut === "jumpNextSentence"
+                                ? "bg-sky-500/20 text-white"
+                                : "bg-white/10 text-white/80 hover:bg-white/20"
+                            }`}
+                            onClick={() => handleShortcutEditToggle("jumpNextSentence")}
+                            aria-pressed={listeningShortcut === "jumpNextSentence"}
+                          >
+                            {getShortcutLabel("jumpNextSentence")}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="py-3 pr-4">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium text-white">Jump to previous sentence</span>
+                          <button
+                            type="button"
+                            className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                            onClick={() => {
+                              const prevStart = findPreviousCueStartMs(currentTimeMs);
+                              if (prevStart === null) return;
+                              jumpToMs(prevStart, { focus: false });
+                            }}
+                            disabled={prevSentenceStart === null}
+                          >
+                            Back
+                          </button>
+                        </div>
+                      </td>
+                      <td className="py-3">
+                        <div className="flex flex-wrap items-center justify-end gap-2 sm:justify-start">
+                          <button
+                            type="button"
+                            className={`rounded border border-white/10 px-2 py-1 transition ${
+                              listeningShortcut === "jumpPrevSentence"
+                                ? "bg-sky-500/20 text-white"
+                                : "bg-white/10 text-white/80 hover:bg-white/20"
+                            }`}
+                            onClick={() => handleShortcutEditToggle("jumpPrevSentence")}
+                            aria-pressed={listeningShortcut === "jumpPrevSentence"}
+                          >
+                            {getShortcutLabel("jumpPrevSentence")}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="py-3 pr-4">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-white">
+                            Skip all gaps between sentences
+                          </span>
+                          <input
+                            type="checkbox"
+                            checked={skipSubtitleGaps}
+                            onChange={(event) => setSkipSubtitleGaps(event.target.checked)}
+                            className="h-3 w-3 rounded border-white/30 bg-slate-900"
+                          />
+                        </div>
+                      </td>
+                      <td className="py-3">
+                        <div className="flex flex-wrap items-center justify-end gap-2 sm:justify-start">
+                          <button
+                            type="button"
+                            className={`rounded border border-white/10 px-2 py-1 transition ${
+                              listeningShortcut === "toggleSkipSubtitleGaps"
+                                ? "bg-sky-500/20 text-white"
+                                : "bg-white/10 text-white/80 hover:bg-white/20"
+                            }`}
+                            onClick={() => handleShortcutEditToggle("toggleSkipSubtitleGaps")}
+                            aria-pressed={listeningShortcut === "toggleSkipSubtitleGaps"}
+                          >
+                            {getShortcutLabel("toggleSkipSubtitleGaps")}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
-          ) : (
-            <p className="text-sm text-white/50">Load a subtitle file to see cues.</p>
-          )}
+          </details>
         </div>
-      </aside>
+      </section>
     </div>
   );
 }
