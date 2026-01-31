@@ -298,6 +298,12 @@ export default function QuotesPage() {
         }
         return null;
       });
+      const video = playbackVideoRef.current;
+      if (video) {
+        video.pause();
+        video.removeAttribute("src");
+        video.load();
+      }
     };
   }, []);
 

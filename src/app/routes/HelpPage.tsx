@@ -1,4 +1,16 @@
+import { useEffect, useRef } from "react";
+
 export default function HelpPage() {
+  const videoRef = useRef<HTMLIFrameElement | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (!videoRef.current) return;
+      // Release the embedded player document when leaving the Help page.
+      videoRef.current.src = "about:blank";
+    };
+  }, []);
+
   return (
     <div className="space-y-6 text-right text-sm text-white/80" dir="rtl">
       <section className="space-y-3">
@@ -12,6 +24,7 @@ export default function HelpPage() {
           <div className="w-full overflow-hidden rounded-lg border border-white/10 bg-black/40 lg:w-[22rem]">
             <div className="aspect-video w-full">
               <iframe
+                ref={videoRef}
                 className="h-full w-full"
                 src="https://www.youtube.com/embed/0n2JBXuHEoc"
                 title="Tutorial"

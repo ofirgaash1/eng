@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { NavLink, Route, Routes } from "react-router-dom";
+import { NavLink, Route, Routes, useLocation } from "react-router-dom";
 import PlayerPage from "./routes/PlayerPage";
 import WordsPage from "./routes/WordsPage";
 import QuotesPage from "./routes/QuotesPage";
@@ -17,6 +17,8 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   }`;
 
 export default function App() {
+  const location = useLocation();
+  const isPlayerRoute = location.pathname === "/" || location.pathname === "";
   const subtitleStyle = usePrefsStore((state) => state.prefs.subtitleStyle);
   const highlightColors = usePrefsStore((state) => state.prefs.highlightColors);
   const initializePrefs = usePrefsStore((state) => state.initialize);
@@ -76,8 +78,11 @@ export default function App() {
           </nav>
         </header>
         <main className="flex-1 rounded-lg border border-white/10 bg-white/5 p-6 shadow-xl backdrop-blur">
+          <div className={isPlayerRoute ? "" : "hidden"} aria-hidden={!isPlayerRoute}>
+            <PlayerPage isActive={isPlayerRoute} />
+          </div>
           <Routes>
-            <Route path="/" element={<PlayerPage />} />
+            <Route path="/" element={<div />} />
             <Route path="/words" element={<WordsPage />} />
             <Route path="/quotes" element={<QuotesPage />} />
             <Route path="/stats" element={<StatsPage />} />

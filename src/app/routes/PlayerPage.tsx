@@ -154,7 +154,7 @@ function SubtitleCueBackground({
   );
 }
 
-export default function PlayerPage() {
+export default function PlayerPage({ isActive = true }: { isActive?: boolean }) {
   const playerContainerRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const workerRef = useRef<Worker | null>(null);
@@ -164,9 +164,12 @@ export default function PlayerPage() {
   const latestParseRef = useRef<{ primary?: string; secondary?: string }>({});
   const videoName = useSessionStore((state) => state.videoName);
   const videoUrl = useSessionStore((state) => state.videoUrl);
+  const videoDurationMs = useSessionStore((state) => state.videoDurationMs);
+  const videoBlob = useSessionStore((state) => state.videoBlob);
   const setVideoFromFile = useSessionStore((state) => state.setVideoFromFile);
   const setVideoFromBlob = useSessionStore((state) => state.setVideoFromBlob);
   const setVideoNameOnly = useSessionStore((state) => state.setVideoNameOnly);
+  const setVideoDurationMs = useSessionStore((state) => state.setVideoDurationMs);
   const [savedVideoTime, setSavedVideoTime] = useState<number | null>(null);
   const [subtitleName, setSubtitleName] = useState<string>("");
   const [cues, setCues] = useState<Cue[]>([]);
@@ -275,7 +278,11 @@ export default function PlayerPage() {
     const syncMutedState = () => setIsMuted(video.muted);
     const syncVolumeState = () => setVolume(video.volume);
     const syncDuration = () => {
-      setDurationMs(Number.isFinite(video.duration) ? video.duration * 1000 : null);
+      const nextDurationMs = Number.isFinite(video.duration) ? video.duration * 1000 : null;
+      setDurationMs(nextDurationMs);
+      if (nextDurationMs) {
+        setVideoDurationMs(nextDurationMs);
+      }
     };
 
     syncPlaybackState();
@@ -298,6 +305,7 @@ export default function PlayerPage() {
       video.removeEventListener("durationchange", syncDuration);
     };
   }, []);
+
 
   const enterFullscreen = useCallback(async () => {
     const container = playerContainerRef.current;
@@ -401,9 +409,9 @@ export default function PlayerPage() {
         return;
       }
 
-      if (session.videoBlob) {
+      if (session.videoBlob && !videoUrl) {
         setVideoFromBlob(session.videoName ?? "", session.videoBlob);
-      } else if (session.videoName) {
+      } else if (session.videoName && !videoUrl) {
         setVideoNameOnly(session.videoName);
       }
 
@@ -551,11 +559,67 @@ export default function PlayerPage() {
     return () => {
       cancelled = true;
     };
-  }, [applyParsedCues, applyParsedSecondaryCues]);
+  }, [applyParsedCues, applyParsedSecondaryCues, setVideoFromBlob, setVideoNameOnly, videoUrl]);
+
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
     video.currentTime = 0;
+    if (videoUrl) {
+      if (video.src !== videoUrl) {
+        video.src = videoUrl;
+      }
+      // Force metadata reload so duration updates after route switches.
+      video.load();
+      return;
+    }
+    video.removeAttribute("src");
+    video.load();
+  }, [videoUrl]);
+
+  useEffect(() => {
+    if (durationMs !== null || !videoDurationMs) return;
+    setDurationMs(videoDurationMs);
+  }, [durationMs, videoDurationMs]);
+
+  useEffect(() => {
+    if (!videoBlob || !videoUrl || !videoName) return;
+    let cancelled = false;
+    const timeout = window.setTimeout(() => {
+      if (cancelled) return;
+      const video = videoRef.current;
+      if (video && video.readyState === 0) {
+        setVideoFromBlob(videoName, videoBlob);
+      }
+    }, 800);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
+  }, [setVideoFromBlob, videoBlob, videoName, videoUrl]);
+
+  useEffect(() => {
+    if (!videoUrl) return;
+    const video = videoRef.current;
+    if (!video) return;
+    let cancelled = false;
+    let attempts = 0;
+    const pollDuration = () => {
+      if (cancelled) return;
+      const duration = video.duration;
+      if (Number.isFinite(duration) && duration > 0) {
+        setDurationMs(duration * 1000);
+        return;
+      }
+      attempts += 1;
+      if (attempts < 20) {
+        window.setTimeout(pollDuration, 250);
+      }
+    };
+    pollDuration();
+    return () => {
+      cancelled = true;
+    };
   }, [videoUrl]);
 
   useEffect(() => {
@@ -985,11 +1049,12 @@ export default function PlayerPage() {
   );
 
   useEffect(() => {
+    if (!isActive) return;
     document.addEventListener("keydown", handleShortcutKeyDown, true);
     return () => {
       document.removeEventListener("keydown", handleShortcutKeyDown, true);
     };
-  }, [handleShortcutKeyDown]);
+  }, [handleShortcutKeyDown, isActive]);
 
   useEffect(() => {
     if (!isPlaying) {
@@ -1043,6 +1108,7 @@ export default function PlayerPage() {
             }}
             onTimeUpdate={handleTimeUpdate}
             src={videoUrl ?? undefined}
+            preload="metadata"
             tabIndex={-1}
           >
             <track kind="subtitles" srcLang="en" label={subtitleName || "Subtitles"} />

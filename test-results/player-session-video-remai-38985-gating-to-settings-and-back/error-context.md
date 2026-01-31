@@ -1,0 +1,70 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e4]:
+  - banner [ref=e5]:
+    - heading "Subtitle Word Tracker" [level=1] [ref=e6]
+    - navigation [ref=e7]:
+      - link "Player" [active] [ref=e8] [cursor=pointer]:
+        - /url: /
+      - link "Words" [ref=e9] [cursor=pointer]:
+        - /url: /words
+      - link "Quotes" [ref=e10] [cursor=pointer]:
+        - /url: /quotes
+      - link "Stats" [ref=e11] [cursor=pointer]:
+        - /url: /stats
+      - link "Settings" [ref=e12] [cursor=pointer]:
+        - /url: /settings
+      - link "Find Subs" [ref=e13] [cursor=pointer]:
+        - /url: /vlsub
+      - link "?" [ref=e14] [cursor=pointer]:
+        - /url: /help
+  - main [ref=e15]:
+    - generic [ref=e17]:
+      - generic [ref=e18]:
+        - generic [ref=e22]:
+          - slider "Seek position" [disabled] [ref=e23] [cursor=pointer]: "0"
+          - generic [ref=e24]:
+            - generic [ref=e25]:
+              - button "Play video" [ref=e26] [cursor=pointer]:
+                - generic: Space
+              - generic [ref=e28]:
+                - button "Mute video" [ref=e29] [cursor=pointer]:
+                  - generic [ref=e30]: 🔊
+                  - generic: M
+                - slider "Volume" [ref=e31] [cursor=pointer]: "1"
+            - generic [ref=e32]: 00:00 / --:--
+            - generic [ref=e34]:
+              - button "Enter fullscreen" [ref=e35] [cursor=pointer]:
+                - generic [ref=e36]: ⛶
+                - generic: F
+              - button "Seek backward 5 seconds" [ref=e37] [cursor=pointer]:
+                - text: "-5s"
+                - generic: ←
+              - button "Seek forward 5 seconds" [ref=e38] [cursor=pointer]:
+                - text: +5s
+                - generic: →
+        - generic [ref=e39]:
+          - generic [ref=e40]: Subtitle timing
+          - generic [ref=e41]:
+            - button "–0.5s" [ref=e42] [cursor=pointer]
+            - button "+0.5s" [ref=e43] [cursor=pointer]
+          - generic [ref=e44]: "Offset: +0.0s"
+        - generic [ref=e45] [cursor=pointer]:
+          - generic [ref=e46]: Load video
+          - generic [ref=e47]: Automatically pairs a matching .srt when selected together.
+          - generic [ref=e48]: "Current: 15seconds.mp4"
+        - generic [ref=e49] [cursor=pointer]:
+          - generic [ref=e50]: Load subtitles (SRT)
+          - generic [ref=e51]: "Current: None"
+        - generic [ref=e52]:
+          - checkbox "Right-to-left order" [ref=e53]
+          - text: Right-to-left order
+        - group [ref=e54]:
+          - generic "Second subtitles (optional)" [ref=e55] [cursor=pointer]
+      - complementary [ref=e56]:
+        - generic [ref=e57]:
+          - heading "Active Cue" [level=2] [ref=e58]
+          - paragraph [ref=e59]: Load a subtitle file to see cues.
+  - contentinfo [ref=e60]: Local-first learning tool for movie subtitles.
+```
