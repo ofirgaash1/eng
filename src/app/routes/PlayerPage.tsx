@@ -9,6 +9,7 @@ import {
 } from "react";
 import { useDictionaryStore } from "../../state/dictionaryStore";
 import { usePrefsStore } from "../../state/prefsStore";
+import { useSessionStore } from "../../state/sessionStore";
 import type { Cue, Token } from "../../core/types";
 import { tokenize } from "../../core/nlp/tokenize";
 import {
@@ -161,8 +162,11 @@ export default function PlayerPage() {
     Map<string, { hash: string; fileName: string; target: "primary" | "secondary" }>
   >(new Map());
   const latestParseRef = useRef<{ primary?: string; secondary?: string }>({});
-  const [videoName, setVideoName] = useState<string>("");
-  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const videoName = useSessionStore((state) => state.videoName);
+  const videoUrl = useSessionStore((state) => state.videoUrl);
+  const setVideoFromFile = useSessionStore((state) => state.setVideoFromFile);
+  const setVideoFromBlob = useSessionStore((state) => state.setVideoFromBlob);
+  const setVideoNameOnly = useSessionStore((state) => state.setVideoNameOnly);
   const [savedVideoTime, setSavedVideoTime] = useState<number | null>(null);
   const [subtitleName, setSubtitleName] = useState<string>("");
   const [cues, setCues] = useState<Cue[]>([]);
@@ -398,16 +402,9 @@ export default function PlayerPage() {
       }
 
       if (session.videoBlob) {
-        const blob = session.videoBlob;
-        setVideoUrl((previous) => {
-          if (previous) {
-            URL.revokeObjectURL(previous);
-          }
-          return URL.createObjectURL(blob);
-        });
-        setVideoName(session.videoName ?? "");
+        setVideoFromBlob(session.videoName ?? "", session.videoBlob);
       } else if (session.videoName) {
-        setVideoName(session.videoName);
+        setVideoNameOnly(session.videoName);
       }
 
       if (session.subtitleName) {
@@ -555,13 +552,6 @@ export default function PlayerPage() {
       cancelled = true;
     };
   }, [applyParsedCues, applyParsedSecondaryCues]);
-  useEffect(() => {
-    if (!videoUrl) return;
-    return () => {
-      URL.revokeObjectURL(videoUrl);
-    };
-  }, [videoUrl]);
-
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -816,14 +806,8 @@ export default function PlayerPage() {
       resetPlayback();
       setSavedVideoTime(0);
       lastVideoTimeSavedRef.current = 0;
-      setVideoName(videoFile.name);
       setCurrentTimeMs(0);
-      setVideoUrl((previous) => {
-        if (previous) {
-          URL.revokeObjectURL(previous);
-        }
-        return URL.createObjectURL(videoFile);
-      });
+      setVideoFromFile(videoFile);
 
       void saveLastSession({ videoName: videoFile.name, videoBlob: videoFile, videoTimeSeconds: 0 });
 
