@@ -1058,12 +1058,14 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
     [cues, subtitleOffsetMs],
   );
 
-  const jumpToMs = useCallback((targetMs: number) => {
+  const jumpToMs = useCallback((targetMs: number, options: { focus?: boolean } = {}) => {
     const video = videoRef.current;
     if (!video) return;
     video.currentTime = targetMs / 1000;
     setCurrentTimeMs(targetMs);
-    playerContainerRef.current?.focus();
+    if (options.focus !== false) {
+      playerContainerRef.current?.focus();
+    }
   }, []);
 
   const adjustSubtitleOffset = useCallback(
@@ -1853,7 +1855,11 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
                           <button
                             type="button"
                             className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-                            onClick={jumpToNextSentence}
+                            onClick={() => {
+                              const nextStart = findNextCueStartMs(currentTimeMs);
+                              if (nextStart === null) return;
+                              jumpToMs(nextStart, { focus: false });
+                            }}
                             disabled={nextSentenceStart === null}
                           >
                             Next
@@ -1884,7 +1890,11 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
                           <button
                             type="button"
                             className="rounded bg-white/10 px-2 py-1 transition hover:bg-white/20 focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-                            onClick={jumpToPreviousSentence}
+                            onClick={() => {
+                              const prevStart = findPreviousCueStartMs(currentTimeMs);
+                              if (prevStart === null) return;
+                              jumpToMs(prevStart, { focus: false });
+                            }}
                             disabled={prevSentenceStart === null}
                           >
                             Back
