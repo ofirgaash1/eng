@@ -1027,7 +1027,7 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
       for (let index = cues.length - 1; index >= 0; index -= 1) {
         const cue = cues[index];
         const adjustedStart = cue.startMs + subtitleOffsetMs;
-        if (timeMs >= adjustedStart - 50) {
+        if (adjustedStart < timeMs - 50) {
           return Math.max(0, adjustedStart);
         }
       }
@@ -1575,7 +1575,7 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
           )}
         </div>
         <div className="space-y-4 rounded-lg border border-white/10 bg-white/5 p-4 text-sm text-white/80">
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid gap-3 md:grid-cols-3">
             <label className="flex w-full cursor-pointer flex-col gap-2 rounded-lg border border-dashed border-white/20 bg-white/5 p-4 text-sm hover:border-white/40">
               <span className="font-medium">Load video</span>
               <input
@@ -1599,35 +1599,25 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
               )}
               {subtitleError && <span className="text-xs text-red-400">{subtitleError}</span>}
             </label>
-          </div>
-          <details className="rounded-lg border border-white/10 bg-white/5 p-4 text-sm">
-            <summary className="cursor-pointer list-none font-medium text-white/90">
-              Second subtitles (optional)
-            </summary>
-            <div className="mt-3 space-y-3 text-xs text-white/70">
+            <label className="flex w-full cursor-pointer flex-col gap-2 rounded-lg border border-dashed border-white/20 bg-white/5 p-4 text-sm hover:border-white/40">
+              <span className="font-medium">Load second subtitles (SRT, optional)</span>
+              <input
+                type="file"
+                accept=".srt"
+                className="hidden"
+                onChange={handleSecondarySubtitleUpload}
+              />
               <span className="text-xs text-white/60">
-                Add a second subtitle track. Visibility and timing controls live below.
+                Current: {secondarySubtitleName || "None"}
               </span>
-              <label className="flex w-full cursor-pointer flex-col gap-2 rounded-lg border border-dashed border-white/20 bg-white/5 p-3 text-xs hover:border-white/40">
-                <span className="font-medium text-sm">Load second subtitles (SRT)</span>
-                <input
-                  type="file"
-                  accept=".srt"
-                  className="hidden"
-                  onChange={handleSecondarySubtitleUpload}
-                />
-                <span className="text-xs text-white/60">
-                  Current: {secondarySubtitleName || "None"}
-                </span>
-                {secondarySubtitleLoading && (
-                  <span className="text-xs text-amber-300">Processing second subtitles…</span>
-                )}
-                {secondarySubtitleError && (
-                  <span className="text-xs text-red-400">{secondarySubtitleError}</span>
-                )}
-              </label>
-            </div>
-          </details>
+              {secondarySubtitleLoading && (
+                <span className="text-xs text-amber-300">Processing second subtitles…</span>
+              )}
+              {secondarySubtitleError && (
+                <span className="text-xs text-red-400">{secondarySubtitleError}</span>
+              )}
+            </label>
+          </div>
           <details className="rounded-lg border border-white/10 bg-white/5 p-4 text-sm">
             <summary className="cursor-pointer list-none font-medium text-white/90">
               More controls & keyboard shortcuts
