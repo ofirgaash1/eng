@@ -1057,6 +1057,14 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
   }, [handleShortcutKeyDown, isActive]);
 
   useEffect(() => {
+    if (isActive) return;
+    const video = videoRef.current;
+    if (video && !video.paused) {
+      video.pause();
+    }
+  }, [isActive]);
+
+  useEffect(() => {
     if (!isPlaying) {
       clearHideControlsTimeout();
       setShowControls(true);
