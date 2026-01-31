@@ -8,6 +8,7 @@ interface PrefsState {
   initialize: () => Promise<void>;
   updateSubtitleStyle: (updates: Partial<UserPrefs["subtitleStyle"]>) => Promise<void>;
   updateHighlightColors: (updates: Partial<UserPrefs["highlightColors"]>) => Promise<void>;
+  updatePlayerShortcuts: (updates: Partial<NonNullable<UserPrefs["playerShortcuts"]>>) => Promise<void>;
   setLastOpened: (input: UserPrefs["lastOpened"]) => Promise<void>;
   setMediaLibrary: (input: UserPrefs["mediaLibrary"]) => Promise<void>;
 }
@@ -29,6 +30,11 @@ const defaultPrefs: UserPrefs = {
     exact: "#10b981",
     variant: "#f97316",
   },
+  playerShortcuts: {
+    toggleSecondarySubtitle: { code: "KeyH", label: "H" },
+    mainSubtitleOffsetBack: { code: "BracketLeft", label: "[" },
+    mainSubtitleOffsetForward: { code: "BracketRight", label: "]" },
+  },
   mediaLibrary: undefined,
 };
 
@@ -38,7 +44,18 @@ export const usePrefsStore = create<PrefsState>((set, get) => ({
   initialize: async () => {
     if (get().initialized) return;
     const stored = await getPrefs();
-    set({ prefs: stored ?? defaultPrefs, initialized: true });
+    if (!stored) {
+      set({ prefs: defaultPrefs, initialized: true });
+      return;
+    }
+    const merged: UserPrefs = {
+      ...defaultPrefs,
+      ...stored,
+      subtitleStyle: { ...defaultPrefs.subtitleStyle, ...stored.subtitleStyle },
+      highlightColors: { ...defaultPrefs.highlightColors, ...stored.highlightColors },
+      playerShortcuts: { ...defaultPrefs.playerShortcuts, ...stored.playerShortcuts },
+    };
+    set({ prefs: merged, initialized: true });
   },
   updateSubtitleStyle: async (updates) => {
     const next: UserPrefs = {
@@ -52,6 +69,14 @@ export const usePrefsStore = create<PrefsState>((set, get) => ({
     const next: UserPrefs = {
       ...get().prefs,
       highlightColors: { ...get().prefs.highlightColors, ...updates },
+    };
+    set({ prefs: next });
+    await savePrefs(next);
+  },
+  updatePlayerShortcuts: async (updates) => {
+    const next: UserPrefs = {
+      ...get().prefs,
+      playerShortcuts: { ...get().prefs.playerShortcuts, ...updates },
     };
     set({ prefs: next });
     await savePrefs(next);

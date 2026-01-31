@@ -27,6 +27,7 @@ export async function saveLastSession(
     subtitleName: updates.subtitleName,
     subtitleText: updates.subtitleText,
     subtitleHash: updates.subtitleHash,
+    subtitleOffsetMs: updates.subtitleOffsetMs,
     videoTimeSeconds: updates.videoTimeSeconds,
     secondarySubtitleName: updates.secondarySubtitleName,
     secondarySubtitleText: updates.secondarySubtitleText,
