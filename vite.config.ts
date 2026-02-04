@@ -27,6 +27,11 @@ function getBase() {
 export default defineConfig({
   base: getBase(),
   plugins: [react()],
+  test: {
+    environment: "jsdom",
+    include: ["src/**/*.test.{ts,tsx}"],
+    exclude: ["e2e/**", "node_modules/**", "dist/**"],
+  },
   server: {
     port: 5173,
   },

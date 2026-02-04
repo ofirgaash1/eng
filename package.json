@@ -12,21 +12,22 @@
   },
   "dependencies": {
     "dexie": "^4.0.4",
+    "nanoid": "^4.0.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.22.3",
-    "zustand": "^4.5.2",
-    "nanoid": "^4.0.2"
+    "zustand": "^4.5.2"
   },
   "devDependencies": {
+    "@playwright/test": "^1.48.2",
     "@types/node": "^20.11.28",
     "@types/react": "^18.2.45",
     "@types/react-dom": "^18.2.18",
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.17",
-    "postcss": "^8.4.35",
-    "@playwright/test": "^1.48.2",
+    "jsdom": "^28.0.0",
     "playwright": "^1.48.2",
+    "postcss": "^8.4.35",
     "tailwindcss": "^3.4.1",
     "typescript": "^5.3.3",
     "vite": "^5.1.4",
