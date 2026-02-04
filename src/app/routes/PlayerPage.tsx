@@ -195,7 +195,6 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
   const videoBlob = useSessionStore((state) => state.videoBlob);
   const setVideoFromFile = useSessionStore((state) => state.setVideoFromFile);
   const setVideoFromBlob = useSessionStore((state) => state.setVideoFromBlob);
-  const setVideoNameOnly = useSessionStore((state) => state.setVideoNameOnly);
   const setVideoDurationMs = useSessionStore((state) => state.setVideoDurationMs);
   const [savedVideoTime, setSavedVideoTime] = useState<number | null>(null);
   const [subtitleName, setSubtitleName] = useState<string>("");
@@ -234,6 +233,7 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
   const prefsInitialized = usePrefsStore((state) => state.initialized);
   const setLastOpened = usePrefsStore((state) => state.setLastOpened);
   const playerShortcuts = usePrefsStore((state) => state.prefs.playerShortcuts);
+  const mediaLibrary = usePrefsStore((state) => state.prefs.mediaLibrary);
   const updatePlayerShortcuts = usePrefsStore((state) => state.updatePlayerShortcuts);
 
   const handleTokenClick = useCallback(
@@ -453,7 +453,20 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
       }
 
       if (session.videoName && !videoUrl) {
-        setVideoNameOnly(session.videoName);
+        try {
+          const handle = await findVideoHandleByName(session.videoName);
+          if (cancelled) {
+            return;
+          }
+          if (handle) {
+            const file = await handle.getFile();
+            if (!cancelled) {
+              setVideoFromFile(file);
+            }
+          }
+        } catch {
+          // Ignore media library restore failures.
+        }
       }
 
       if (session.subtitleName) {
@@ -603,7 +616,7 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
     return () => {
       cancelled = true;
     };
-  }, [applyParsedCues, applyParsedSecondaryCues, setVideoNameOnly, videoUrl]);
+  }, [applyParsedCues, applyParsedSecondaryCues, findVideoHandleByName, setVideoFromFile, videoUrl]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -895,6 +908,68 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
       }
     },
     [applyParsedSecondaryCues, applySecondaryCuesState],
+  );
+
+  const ensureLibraryAccess = useCallback(async () => {
+    if (!mediaLibrary?.handle) {
+      return null;
+    }
+    try {
+      const queryPermission = (mediaLibrary.handle as FileSystemDirectoryHandle & {
+        queryPermission?: (options: unknown) => Promise<PermissionState>;
+        requestPermission?: (options: unknown) => Promise<PermissionState>;
+      }).queryPermission;
+      const requestPermission = (mediaLibrary.handle as FileSystemDirectoryHandle & {
+        requestPermission?: (options: unknown) => Promise<PermissionState>;
+      }).requestPermission;
+
+      if (!queryPermission || !requestPermission) {
+        return mediaLibrary.handle;
+      }
+
+      const permission = await queryPermission.call(mediaLibrary.handle, { mode: "read" });
+      if (permission === "granted") {
+        return mediaLibrary.handle;
+      }
+      if (permission === "denied") {
+        return null;
+      }
+      const next = await requestPermission.call(mediaLibrary.handle, { mode: "read" });
+      if (next === "granted") return mediaLibrary.handle;
+      return null;
+    } catch {
+      return null;
+    }
+  }, [mediaLibrary]);
+
+  const findVideoHandleByName = useCallback(
+    async (fileName: string): Promise<FileSystemFileHandle | null> => {
+      const handle = await ensureLibraryAccess();
+      if (!handle) return null;
+      const target = fileName.toLowerCase();
+      const queue: FileSystemDirectoryHandle[] = [handle];
+
+      while (queue.length > 0) {
+        const current = queue.shift();
+        if (!current) continue;
+        const iterator = (current as FileSystemDirectoryHandle & {
+          values?: () => AsyncIterable<FileSystemDirectoryHandle | FileSystemFileHandle>;
+        }).values;
+        if (!iterator) continue;
+        for await (const entry of iterator.call(current)) {
+          if (entry.kind === "file") {
+            if (entry.name.toLowerCase() === target) {
+              return entry as FileSystemFileHandle;
+            }
+          } else if (entry.kind === "directory") {
+            queue.push(entry as FileSystemDirectoryHandle);
+          }
+        }
+      }
+
+      return null;
+    },
+    [ensureLibraryAccess],
   );
 
   const handleVideoUpload = useCallback(

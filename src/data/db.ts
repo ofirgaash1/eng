@@ -76,6 +76,28 @@ export class SubtitleLearnerDB extends Dexie {
         return tx.table("words").clear().then(() => tx.table("words").bulkPut(sanitized));
       });
     });
+    this.version(5).stores({
+      words: "&id, normalized, stem, updatedAt",
+      subtitleFiles: "&id, bytesHash, addedAt",
+      prefs: "&id, updatedAt",
+      subtitleCues: "&id, fileHash, index",
+      sessions: "&id, updatedAt",
+    });
+    this.version(5).upgrade((tx) => {
+      return tx
+        .table("sessions")
+        .toArray()
+        .then((records) => {
+          const sanitized = records.map((record) => {
+            if (!record || typeof record !== "object") {
+              return record;
+            }
+            const { videoBlob, ...rest } = record as { videoBlob?: Blob };
+            return rest;
+          });
+          return tx.table("sessions").clear().then(() => tx.table("sessions").bulkPut(sanitized));
+        });
+    });
   }
 }
 
