@@ -57,8 +57,7 @@ function stripPrefsForTransfer(prefs: UserPrefs): UserPrefs {
 }
 
 function stripSessionForTransfer(session: RecentSessionRecord): RecentSessionRecord {
-  const { videoBlob, ...rest } = session;
-  return rest;
+  return session;
 }
 
 function ensureArray<T>(value: unknown): T[] {
