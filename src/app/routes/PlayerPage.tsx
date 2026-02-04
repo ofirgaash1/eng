@@ -452,9 +452,7 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
         return;
       }
 
-      if (session.videoBlob && !videoUrl) {
-        setVideoFromBlob(session.videoName ?? "", session.videoBlob);
-      } else if (session.videoName && !videoUrl) {
+      if (session.videoName && !videoUrl) {
         setVideoNameOnly(session.videoName);
       }
 
@@ -605,7 +603,7 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
     return () => {
       cancelled = true;
     };
-  }, [applyParsedCues, applyParsedSecondaryCues, setVideoFromBlob, setVideoNameOnly, videoUrl]);
+  }, [applyParsedCues, applyParsedSecondaryCues, setVideoNameOnly, videoUrl]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -920,7 +918,7 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
       setCurrentTimeMs(0);
       setVideoFromFile(videoFile);
 
-      void saveLastSession({ videoName: videoFile.name, videoBlob: videoFile, videoTimeSeconds: 0 });
+      void saveLastSession({ videoName: videoFile.name, videoTimeSeconds: 0 });
 
       const baseName = videoFile.name.replace(/\.[^.]+$/, "").toLowerCase();
       const matchingSubtitle = fileArray.find(

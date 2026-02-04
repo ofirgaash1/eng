@@ -23,7 +23,6 @@ export async function saveLastSession(
     id: SESSION_ID,
     updatedAt,
     videoName: updates.videoName,
-    videoBlob: updates.videoBlob,
     subtitleName: updates.subtitleName,
     subtitleText: updates.subtitleText,
     subtitleHash: updates.subtitleHash,
