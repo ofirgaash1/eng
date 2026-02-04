@@ -87,7 +87,6 @@ export interface UserPrefs {
 export interface RecentSessionRecord {
   id: string;
   videoName?: string;
-  videoBlob?: Blob;
   subtitleName?: string;
   subtitleText?: string;
   subtitleHash?: string;
