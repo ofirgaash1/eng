@@ -39,6 +39,11 @@ export interface Token {
   isWord: boolean;
 }
 
+export interface ShortcutBinding {
+  code: string;
+  label: string;
+}
+
 export interface UserPrefs {
   subtitleStyle: {
     fontFamily: string;
@@ -56,6 +61,18 @@ export interface UserPrefs {
     exact: string;
     variant: string;
   };
+  playerShortcuts?: {
+    toggleSecondarySubtitle?: ShortcutBinding;
+    mainSubtitleOffsetBack?: ShortcutBinding;
+    mainSubtitleOffsetForward?: ShortcutBinding;
+    secondarySubtitleOffsetBack?: ShortcutBinding;
+    secondarySubtitleOffsetForward?: ShortcutBinding;
+    jumpNextSentence?: ShortcutBinding;
+    jumpPrevSentence?: ShortcutBinding;
+    toggleMainSubtitleRtl?: ShortcutBinding;
+    toggleSecondarySubtitleRtl?: ShortcutBinding;
+    toggleSkipSubtitleGaps?: ShortcutBinding;
+  };
   mediaLibrary?: {
     handle?: FileSystemDirectoryHandle;
     label?: string;
@@ -70,10 +87,10 @@ export interface UserPrefs {
 export interface RecentSessionRecord {
   id: string;
   videoName?: string;
-  videoBlob?: Blob;
   subtitleName?: string;
   subtitleText?: string;
   subtitleHash?: string;
+  subtitleOffsetMs?: number;
   videoTimeSeconds?: number;
   secondarySubtitleName?: string;
   secondarySubtitleText?: string;
