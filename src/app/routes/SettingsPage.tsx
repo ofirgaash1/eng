@@ -3,6 +3,14 @@ import { exportAllData, importAllData, summarizeBackup } from "../../data/backup
 import { useDictionaryStore } from "../../state/dictionaryStore";
 import { usePrefsStore } from "../../state/prefsStore";
 
+type ImportProgressState = {
+  percent: number;
+  stage: string;
+  fileName?: string;
+  fileIndex?: number;
+  totalFiles?: number;
+};
+
 export default function SettingsPage() {
   const subtitleStyle = usePrefsStore((state) => state.prefs.subtitleStyle);
   const highlightColors = usePrefsStore((state) => state.prefs.highlightColors);
@@ -17,9 +25,7 @@ export default function SettingsPage() {
   const [transferSuccess, setTransferSuccess] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
-  const [importProgress, setImportProgress] = useState<{ percent: number; stage: string } | null>(
-    null
-  );
+  const [importProgress, setImportProgress] = useState<ImportProgressState | null>(null);
   const [importElapsed, setImportElapsed] = useState(0);
   const importInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -117,33 +123,81 @@ export default function SettingsPage() {
   };
 
   const handleImportEverything = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(event.target.files ?? []);
+    if (files.length === 0) return;
     setTransferError(null);
     setTransferSuccess(null);
     setIsImporting(true);
-    setImportProgress({ percent: 5, stage: "Reading file" });
     try {
-      const text = await file.text();
-      setImportProgress({ percent: 15, stage: "Parsing backup" });
-      const payload = JSON.parse(text);
-      const summary = summarizeBackup(payload);
-      setImportProgress({
-        percent: 15,
-        stage: `Parsed backup (${summary.words} words, ${summary.subtitleFiles} files)`,
-      });
-      const counts = await importAllData(payload, {
-        onProgress: (progress) => {
-          const percent = Math.min(100, Math.max(15, 15 + progress.percent * 0.85));
-          setImportProgress({ percent, stage: progress.stage });
-        },
-      });
+      const totalFiles = files.length;
+      const totalProgressShare = 100 / totalFiles;
+      let counts: Awaited<ReturnType<typeof importAllData>> | null = null;
+
+      for (let index = 0; index < files.length; index += 1) {
+        const file = files[index];
+        const fileLabel = `${index + 1}/${totalFiles}`;
+        const base = index * totalProgressShare;
+        const toOverallPercent = (filePercent: number) =>
+          Math.min(100, Math.max(0, base + (filePercent / 100) * totalProgressShare));
+
+        setImportProgress({
+          percent: toOverallPercent(5),
+          stage: "Reading file",
+          fileName: file.name,
+          fileIndex: index + 1,
+          totalFiles,
+        });
+        try {
+          const text = await file.text();
+          setImportProgress({
+            percent: toOverallPercent(15),
+            stage: "Parsing backup",
+            fileName: file.name,
+            fileIndex: index + 1,
+            totalFiles,
+          });
+          const payload = JSON.parse(text);
+          const summary = summarizeBackup(payload);
+          setImportProgress({
+            percent: toOverallPercent(15),
+            stage: `Parsed backup (${summary.words} words, ${summary.subtitleFiles} files)`,
+            fileName: file.name,
+            fileIndex: index + 1,
+            totalFiles,
+          });
+          counts = await importAllData(payload, {
+            onProgress: (progress) => {
+              setImportProgress({
+                percent: toOverallPercent(progress.percent),
+                stage: progress.stage,
+                fileName: file.name,
+                fileIndex: index + 1,
+                totalFiles,
+              });
+            },
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Unable to import data.";
+          throw new Error(`File ${fileLabel} (${file.name}) failed: ${message}`);
+        }
+        setImportProgress({
+          percent: toOverallPercent(100),
+          stage: totalFiles > 1 ? `Finished file ${fileLabel}` : "Finished",
+          fileName: file.name,
+          fileIndex: index + 1,
+          totalFiles,
+        });
+      }
+
       usePrefsStore.setState({ initialized: false });
       void usePrefsStore.getState().initialize();
       useDictionaryStore.setState({ initialized: false });
       void useDictionaryStore.getState().initialize();
+      if (!counts) {
+        throw new Error("Import finished with no result.");
+      }
       setTransferSuccess(
-        `Merged data. Now storing ${counts.words} word${counts.words === 1 ? "" : "s"} (${counts.addedWords} added) and ${counts.subtitleFiles} subtitle file${counts.subtitleFiles === 1 ? "" : "s"} (${counts.addedSubtitleFiles} added).`
+        `Imported ${files.length} backup file${files.length === 1 ? "" : "s"} and merged everything. You can now delete old backup files and export a single fresh JSON. Current totals: ${counts.words} word${counts.words === 1 ? "" : "s"} and ${counts.subtitleFiles} subtitle file${counts.subtitleFiles === 1 ? "" : "s"}.`
       );
     } catch (error) {
       setTransferSuccess(null);
@@ -335,9 +389,9 @@ export default function SettingsPage() {
         <h2 className="text-xl font-semibold">Data Transfer</h2>
         <p className="text-sm text-white/70">
           Export a full backup of your words, subtitles database, preferences, and last session.
-          Import merges with existing data; newer timestamps win for words and subtitle files, and
-          prefs from the backup override local settings. Media library folder access cannot be
-          exported; reselect it after import.
+          Import accepts one or many JSON backups and merges each one in order. Newer timestamps win
+          for words and subtitle files, and prefs from backups override local settings. Media library
+          folder access cannot be exported; reselect it after import.
         </p>
         <div className="flex flex-wrap items-center gap-3">
           <button
@@ -360,6 +414,7 @@ export default function SettingsPage() {
             ref={importInputRef}
             type="file"
             accept=".json"
+            multiple
             className="hidden"
             onChange={handleImportEverything}
           />
@@ -373,7 +428,12 @@ export default function SettingsPage() {
               />
             </div>
             <p className="mt-1 text-xs text-white/60">
-              Importing: {importProgress.stage} ({Math.round(importProgress.percent)}%, {importElapsed}s)
+              Importing{importProgress.fileIndex && importProgress.totalFiles
+                ? ` ${importProgress.fileIndex}/${importProgress.totalFiles}`
+                : ""}
+              : {importProgress.stage}
+              {importProgress.fileName ? ` (${importProgress.fileName})` : ""} (
+              {Math.round(importProgress.percent)}%, {importElapsed}s)
             </p>
           </div>
         ) : null}

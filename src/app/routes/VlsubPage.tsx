@@ -1,37 +1,10 @@
 import { useCallback, useMemo, useState } from "react";
 
-const HASH_CHUNK_SIZE = 64 * 1024;
 const API_BASE = "https://api.opensubtitles.com/api/v1";
 const DEFAULT_API_KEY = "oq1XXcuCnNOnaFDKbknI2pxaQO8TiiU5";
 const LOCAL_API_KEY = "Er4Y8GbS7JoCcLf9oJmjc2noj2wIsrNu";
 const FALLBACK_API_KEY = "UVUt5ZRVmROJD7ot9JVJY63n8RTIhxYW";
 const API_CONSUMER_NAME = "ofir gaash v1.0";
-
-const readChunk = async (file: File, start: number, length: number) => {
-  const slice = file.slice(start, start + length);
-  const buffer = await slice.arrayBuffer();
-  return new DataView(buffer);
-};
-
-const sumChunk = (view: DataView) => {
-  let sum = 0n;
-  const length = view.byteLength - (view.byteLength % 8);
-  for (let i = 0; i < length; i += 8) {
-    sum += view.getBigUint64(i, true);
-  }
-  return sum;
-};
-
-const computeHash = async (file: File) => {
-  const size = file.size;
-  const firstChunk = await readChunk(file, 0, HASH_CHUNK_SIZE);
-  const lastStart = Math.max(0, size - HASH_CHUNK_SIZE);
-  const lastChunk = await readChunk(file, lastStart, HASH_CHUNK_SIZE);
-  let hash = BigInt(size);
-  hash += sumChunk(firstChunk);
-  hash += sumChunk(lastChunk);
-  return hash.toString(16).padStart(16, "0");
-};
 
 type StatusTone = "neutral" | "loading" | "success" | "error";
 
@@ -59,7 +32,6 @@ type SubtitleItem = {
     };
     files?: SubtitleFile[];
   };
-  downloadLink?: string;
 };
 
 type SortField = "title" | "downloads" | "hearingImpaired";
@@ -70,6 +42,17 @@ const buildHeaders = (apiKey: string) => ({
   "Content-Type": "application/json",
   "X-User-Agent": API_CONSUMER_NAME,
 });
+
+const ensureSrtFileName = (name: string | undefined, fallbackId: string) => {
+  const trimmed = name?.trim() || `subtitle-${fallbackId}`;
+  if (/\.srt$/i.test(trimmed)) {
+    return trimmed;
+  }
+  if (/\.[^.\\/]+$/.test(trimmed)) {
+    return trimmed.replace(/\.[^.\\/]+$/, ".srt");
+  }
+  return `${trimmed}.srt`;
+};
 
 const describeResponse = async (response: Response) => {
   let bodyText = "";
@@ -181,21 +164,6 @@ export default function VlsubPage() {
     [apiKey, clearResults, updateStatus],
   );
 
-  const handleSearchHash = async () => {
-    if (!ensureReady() || !file) return;
-    updateStatus("Calculating video hash...", "loading");
-    try {
-      const hash = await computeHash(file);
-      await searchSubtitles({
-        moviehash: hash,
-        moviehash_match: "1",
-        languages: language,
-      });
-    } catch (error) {
-      updateStatus(`Hash failed: ${(error as Error).message}`, "error");
-    }
-  };
-
   const handleSearchName = async () => {
     if (!ensureReady() || !file) return;
     await searchSubtitles({
@@ -204,12 +172,13 @@ export default function VlsubPage() {
     });
   };
 
-  const handleDownload = async (item: SubtitleItem) => {
+  const handleDownload = useCallback(async (item: SubtitleItem) => {
     const fileInfo = item.attributes.files?.[0];
     if (!fileInfo?.file_id) {
       updateStatus("This subtitle entry does not include a file id.", "error");
       return;
     }
+    setDownloadingId(item.id);
     updateStatus("Preparing download...", "loading");
     try {
       const response = await fetch(`${API_BASE}/download`, {
@@ -221,55 +190,36 @@ export default function VlsubPage() {
         const details = await describeResponse(response);
         throw new Error(`Download request failed.\n${details}`);
       }
-      const payload = (await response.json()) as { link?: string };
-      setResults((prev) =>
-        prev?.map((entry) =>
-          entry.id === item.id ? { ...entry, downloadLink: payload.link } : entry,
-        ) ?? [],
-      );
-      updateStatus("Download link ready.", "success");
+      const payload = (await response.json()) as { link?: string; file_name?: string };
+      if (!payload.link) {
+        throw new Error("Download request succeeded but returned no link.");
+      }
+
+      const fileName = ensureSrtFileName(payload.file_name ?? fileInfo.file_name, item.id);
+      updateStatus(`Downloading ${fileName}...`, "loading");
+      const fileResponse = await fetch(payload.link);
+      if (!fileResponse.ok) {
+        const details = await describeResponse(fileResponse);
+        throw new Error(`Subtitle download failed.\n${details}`);
+      }
+      const blob = await fileResponse.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      updateStatus(`Downloaded ${fileName}.`, "success");
     } catch (error) {
-      const message = (error as Error).message || "Download request failed.";
+      const message = (error as Error).message || "Subtitle download failed.";
       const [summary, ...rest] = message.split("\n");
       updateStatus(summary, "error", rest.join("\n"));
+    } finally {
+      setDownloadingId(null);
     }
-  };
-
-  const handleDownloadFile = useCallback(
-    async (item: SubtitleItem) => {
-      if (!item.downloadLink) {
-        updateStatus("Download link not ready yet.", "error");
-        return;
-      }
-      const fileName = item.attributes.files?.[0]?.file_name ?? `subtitle-${item.id}.srt`;
-      setDownloadingId(item.id);
-      updateStatus(`Downloading ${fileName}...`, "loading");
-      try {
-        const response = await fetch(item.downloadLink);
-        if (!response.ok) {
-          const details = await describeResponse(response);
-          throw new Error(`Subtitle download failed.\n${details}`);
-        }
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = fileName;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-        updateStatus(`Downloaded ${fileName}.`, "success");
-      } catch (error) {
-        const message = (error as Error).message || "Subtitle download failed.";
-        const [summary, ...rest] = message.split("\n");
-        updateStatus(summary, "error", rest.join("\n"));
-      } finally {
-        setDownloadingId(null);
-      }
-    },
-    [updateStatus],
-  );
+  }, [apiKey, updateStatus]);
 
   const statusToneStyle = toneStyles[status.tone];
   const statusLabel = status.summary || "";
@@ -315,8 +265,8 @@ export default function VlsubPage() {
           Find subtitles for your video, straight from your browser.
         </h2>
         <p className="mt-3 max-w-2xl text-sm text-white/70">
-          Select a local video file, look up subtitles by hash or filename, and download the match
-          you want. Powered by the OpenSubtitles API.
+          Select a local video file, look up subtitles by filename, and download the match you
+          want. Powered by the OpenSubtitles API.
         </p>
       </header>
 
@@ -386,14 +336,14 @@ export default function VlsubPage() {
         <div className="rounded-2xl border border-white/10 bg-white/5 p-6 shadow-md">
           <h3 className="text-lg font-semibold text-white">2. Choose your video</h3>
           <p className="mt-2 text-sm text-white/60">
-            We never upload your video. The hash is computed locally in your browser.
+            We never upload your video. Only the filename is used for search.
           </p>
           <div className="mt-4 flex flex-col gap-2 text-sm text-white/70">
             <span>Video file</span>
             <input
               id="videoFile"
               type="file"
-              accept="video/*,.mkv,.mp4,.mov,.avi,.wmv,.flv,.webm,.m4v,.mpg,.mpeg"
+              accept="video/*,video/x-matroska,.mkv,.MKV,.mp4,.mov,.avi,.wmv,.flv,.webm,.m4v,.mpg,.mpeg"
               onChange={(event) => {
                 const nextFile = event.target.files?.[0] ?? null;
                 setFile(nextFile);
@@ -434,22 +384,13 @@ export default function VlsubPage() {
           </div>
           <div className="mt-5 flex flex-wrap gap-3">
             <button
-              id="searchHash"
-              type="button"
-              onClick={handleSearchHash}
-              disabled={isSearching}
-              className="rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-medium text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              Search by hash
-            </button>
-            <button
               id="searchName"
               type="button"
               onClick={handleSearchName}
               disabled={isSearching}
-              className="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-white/70 transition hover:border-white/20 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-medium text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Search by filename
+              Find subtitles
             </button>
           </div>
           <div
@@ -536,25 +477,14 @@ export default function VlsubPage() {
                           {item.attributes.hearing_impaired ? "Yes" : "No"}
                         </td>
                         <td className="px-4 py-3 text-right text-xs">
-                          {item.downloadLink ? (
-                            <button
-                              type="button"
-                              onClick={() => void handleDownloadFile(item)}
-                              disabled={downloadingId === item.id}
-                              className="inline-flex min-w-[9.5rem] items-center justify-center rounded-full border border-white/20 px-3 py-1 text-xs text-white/80 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              {downloadingId === item.id ? "Downloading..." : "Download subtitle"}
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => handleDownload(item)}
-                              disabled={isSearching}
-                              className="inline-flex min-w-[9.5rem] items-center justify-center whitespace-nowrap rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              Get download link
-                            </button>
-                          )}
+                          <button
+                            type="button"
+                            onClick={() => void handleDownload(item)}
+                            disabled={isSearching || downloadingId === item.id || !fileInfo?.file_id}
+                            className="inline-flex min-w-[9.5rem] items-center justify-center whitespace-nowrap rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {downloadingId === item.id ? "Downloading..." : "Download subtitle"}
+                          </button>
                         </td>
                       </tr>
                     );

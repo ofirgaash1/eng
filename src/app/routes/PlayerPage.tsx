@@ -990,68 +990,6 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
     [applyParsedSecondaryCues, applySecondaryCuesState],
   );
 
-  const ensureLibraryAccess = useCallback(async () => {
-    if (!mediaLibrary?.handle) {
-      return null;
-    }
-    try {
-      const queryPermission = (mediaLibrary.handle as FileSystemDirectoryHandle & {
-        queryPermission?: (options: unknown) => Promise<PermissionState>;
-        requestPermission?: (options: unknown) => Promise<PermissionState>;
-      }).queryPermission;
-      const requestPermission = (mediaLibrary.handle as FileSystemDirectoryHandle & {
-        requestPermission?: (options: unknown) => Promise<PermissionState>;
-      }).requestPermission;
-
-      if (!queryPermission || !requestPermission) {
-        return mediaLibrary.handle;
-      }
-
-      const permission = await queryPermission.call(mediaLibrary.handle, { mode: "read" });
-      if (permission === "granted") {
-        return mediaLibrary.handle;
-      }
-      if (permission === "denied") {
-        return null;
-      }
-      const next = await requestPermission.call(mediaLibrary.handle, { mode: "read" });
-      if (next === "granted") return mediaLibrary.handle;
-      return null;
-    } catch {
-      return null;
-    }
-  }, [mediaLibrary]);
-
-  const findVideoHandleByName = useCallback(
-    async (fileName: string): Promise<FileSystemFileHandle | null> => {
-      const handle = await ensureLibraryAccess();
-      if (!handle) return null;
-      const target = fileName.toLowerCase();
-      const queue: FileSystemDirectoryHandle[] = [handle];
-
-      while (queue.length > 0) {
-        const current = queue.shift();
-        if (!current) continue;
-        const iterator = (current as FileSystemDirectoryHandle & {
-          values?: () => AsyncIterable<FileSystemDirectoryHandle | FileSystemFileHandle>;
-        }).values;
-        if (!iterator) continue;
-        for await (const entry of iterator.call(current)) {
-          if (entry.kind === "file") {
-            if (entry.name.toLowerCase() === target) {
-              return entry as FileSystemFileHandle;
-            }
-          } else if (entry.kind === "directory") {
-            queue.push(entry as FileSystemDirectoryHandle);
-          }
-        }
-      }
-
-      return null;
-    },
-    [ensureLibraryAccess],
-  );
-
   const handleVideoUpload = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
       const files = event.target.files;
@@ -1518,7 +1456,7 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
       <section className="space-y-4">
         <div
           ref={playerContainerRef}
-          className={`relative aspect-video overflow-hidden rounded-lg bg-black shadow-xl focus:outline-none focus-visible:none ${
+          className={`relative aspect-video overflow-hidden rounded-lg bg-black shadow-xl focus:outline-none focus-visible:outline-none ${
             isFullscreen && !showCursor ? "cursor-none" : ""
           }`}
           onDoubleClick={toggleFullscreen}
