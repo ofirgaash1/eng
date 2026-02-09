@@ -8,7 +8,9 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest",
-    "test:e2e": "playwright test"
+    "test:run": "vitest run",
+    "test:e2e": "playwright test",
+    "backup:compact": "node scripts/compact-backup.mjs"
   },
   "dependencies": {
     "dexie": "^4.0.4",

@@ -29,6 +29,7 @@ import { parseSrt } from "../../core/parsing/srtParser";
 const RTL_TEXT_RE = /[\u0591-\u07FF\uFB1D-\uFDFD\uFE70-\uFEFC]/;
 const RTL_LEADING_PUNCT_RE = /^[.!?…،؛؟]+$/u;
 const VOLUME_STEPS = [1, 2, 3, 4, 5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100];
+const INVALID_SUBTITLE_MESSAGE = "No valid subtitle cues found. Use a valid .srt file.";
 
 function detectRtlFromCues(cues: Cue[]): boolean {
   return cues.some((cue) => RTL_TEXT_RE.test(cue.rawText));
@@ -85,6 +86,13 @@ function stopShortcutEvent(event: KeyboardEvent) {
   if (typeof event.stopImmediatePropagation === "function") {
     event.stopImmediatePropagation();
   }
+}
+
+function ensureParsedSubtitleCues(cues: Cue[]): Cue[] {
+  if (cues.length === 0) {
+    throw new Error(INVALID_SUBTITLE_MESSAGE);
+  }
+  return cues;
 }
 
 function useDisplayTokens(cue: Cue, isRtl: boolean) {
@@ -274,19 +282,21 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
   }, []);
 
   const applyParsedCues = useCallback(async (hash: string, fileName: string, parsed: Cue[]) => {
-    applyPrimaryCuesState(parsed);
+    const validParsed = ensureParsedSubtitleCues(parsed);
+    applyPrimaryCuesState(validParsed);
     await Promise.all([
-      saveCuesForFile(hash, parsed),
-      upsertSubtitleFile({ name: fileName, bytesHash: hash, totalCues: parsed.length }),
+      saveCuesForFile(hash, validParsed),
+      upsertSubtitleFile({ name: fileName, bytesHash: hash, totalCues: validParsed.length }),
     ]);
   }, [applyPrimaryCuesState]);
 
   const applyParsedSecondaryCues = useCallback(
     async (hash: string, fileName: string, parsed: Cue[]) => {
-      applySecondaryCuesState(parsed);
+      const validParsed = ensureParsedSubtitleCues(parsed);
+      applySecondaryCuesState(validParsed);
       await Promise.all([
-        saveCuesForFile(hash, parsed),
-        upsertSubtitleFile({ name: fileName, bytesHash: hash, totalCues: parsed.length }),
+        saveCuesForFile(hash, validParsed),
+        upsertSubtitleFile({ name: fileName, bytesHash: hash, totalCues: validParsed.length }),
       ]);
     },
     [applySecondaryCuesState],
@@ -426,9 +436,11 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
       } catch (error) {
         console.error(error);
         if (pending.target === "secondary") {
-          setSecondarySubtitleError("Failed to store parsed secondary subtitles.");
+          setSecondarySubtitleError(
+            error instanceof Error ? error.message : "Failed to store parsed secondary subtitles.",
+          );
         } else {
-          setSubtitleError("Failed to store parsed subtitles.");
+          setSubtitleError(error instanceof Error ? error.message : "Failed to store parsed subtitles.");
         }
       } finally {
         if (pending.target === "secondary") {

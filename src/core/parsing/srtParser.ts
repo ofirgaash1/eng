@@ -24,22 +24,56 @@ function sanitizeCueText(text: string) {
     .trim();
 }
 
+function parseCueIndex(value: string | undefined, fallback: number) {
+  const parsed = Number.parseInt(value?.trim() ?? "", 10);
+  if (Number.isFinite(parsed)) {
+    return parsed;
+  }
+  return fallback;
+}
+
 export function parseSrt(text: string): Cue[] {
-  return text
-    .split(/\r?\n\r?\n/)
-    .filter(Boolean)
-    .map((block, index) => {
-      const [maybeIndex, times, ...textLines] = block.split(/\r?\n/);
-      const match = times?.match(TIME_REGEX);
-      const start = match?.[1] ?? "00:00:00,000";
-      const end = match?.[2] ?? "00:00:00,000";
-      const rawText = sanitizeCueText(textLines.join("\n"));
-      return {
-        index: Number.parseInt(maybeIndex ?? String(index), 10),
-        startMs: toMs(start),
-        endMs: toMs(end),
-        rawText,
-      } satisfies Cue;
-    })
-    .filter((cue) => cue.rawText.length > 0);
+  const cues: Cue[] = [];
+  const blocks = text.split(/\r?\n\r?\n/).filter(Boolean);
+
+  for (const block of blocks) {
+    const lines = block
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+
+    if (lines.length < 2) {
+      continue;
+    }
+
+    const timeLineIndex = lines.findIndex((line) => TIME_REGEX.test(line));
+    if (timeLineIndex === -1) {
+      continue;
+    }
+
+    const match = lines[timeLineIndex]?.match(TIME_REGEX);
+    if (!match) {
+      continue;
+    }
+
+    const rawText = sanitizeCueText(lines.slice(timeLineIndex + 1).join("\n"));
+    if (!rawText) {
+      continue;
+    }
+
+    const startMs = toMs(match[1]);
+    const endMs = toMs(match[2]);
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) {
+      continue;
+    }
+
+    cues.push({
+      index: parseCueIndex(lines[timeLineIndex - 1], cues.length),
+      startMs,
+      endMs,
+      rawText,
+    });
+  }
+
+  return cues;
 }

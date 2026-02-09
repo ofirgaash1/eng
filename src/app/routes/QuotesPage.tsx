@@ -253,7 +253,26 @@ export default function QuotesPage() {
     setLibraryLoading(true);
     try {
       const files = await listSubtitleFiles();
-      setLibrary(files);
+      const validFiles: SubtitleFile[] = [];
+      let removedCount = 0;
+
+      for (const file of files) {
+        const cues = await getCuesForFile(file.bytesHash);
+        if (cues && cues.length > 0) {
+          validFiles.push(file);
+          continue;
+        }
+        await deleteSubtitleFile(file.id);
+        removedCount += 1;
+      }
+
+      if (removedCount > 0) {
+        setError((current) =>
+          current ?? `Removed ${removedCount} invalid subtitle source${removedCount === 1 ? "" : "s"}.`
+        );
+      }
+
+      setLibrary(validFiles);
     } finally {
       setLibraryLoading(false);
     }
@@ -395,8 +414,11 @@ export default function QuotesPage() {
             if (!cues) {
               const text = await readSubtitleText(file);
               cues = await parseWithWorker(text);
-              await saveCuesForFile(hash, cues);
             }
+            if (!cues || cues.length === 0) {
+              throw new Error("No valid subtitle cues found. Use a valid .srt file.");
+            }
+            await saveCuesForFile(hash, cues);
             await upsertSubtitleFile({ name: file.name, bytesHash: hash, totalCues: cues.length });
           } catch (fileError) {
             const message =

@@ -99,8 +99,10 @@ export default function SettingsPage() {
     setTransferSuccess(null);
     setIsExporting(true);
     try {
-      const { payload, counts } = await exportAllData();
-      const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      const { payload, counts } = await exportAllData({
+        includeCueTokens: false,
+      });
+      const blob = new Blob([JSON.stringify(payload)], {
         type: "application/json",
       });
       const url = URL.createObjectURL(blob);
@@ -112,7 +114,7 @@ export default function SettingsPage() {
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
       setTransferSuccess(
-        `Exported ${counts.words} word${counts.words === 1 ? "" : "s"} and ${counts.subtitleFiles} subtitle file${counts.subtitleFiles === 1 ? "" : "s"}.`
+        `Exported a compact backup with ${counts.words} word${counts.words === 1 ? "" : "s"} and ${counts.subtitleFiles} subtitle file${counts.subtitleFiles === 1 ? "" : "s"}.`
       );
     } catch (error) {
       setTransferSuccess(null);
@@ -388,7 +390,8 @@ export default function SettingsPage() {
       <section className="space-y-3">
         <h2 className="text-xl font-semibold">Data Transfer</h2>
         <p className="text-sm text-white/70">
-          Export a full backup of your words, subtitles database, preferences, and last session.
+          Export a compact backup of your words, subtitles database, preferences, and last session.
+          The export omits derived token caches to keep file sizes much smaller.
           Import accepts one or many JSON backups and merges each one in order. Newer timestamps win
           for words and subtitle files, and prefs from backups override local settings. Media library
           folder access cannot be exported; reselect it after import.

@@ -6,6 +6,7 @@ import type {
   UnknownWord,
   UserPrefs,
 } from "../core/types";
+import { tokenize } from "../core/nlp/tokenize";
 import { db, ensureDbReady, withDb, withDbVoid } from "./db";
 
 const PREFS_ID = "prefs";
@@ -49,6 +50,10 @@ type ImportOptions = {
   onProgress?: (progress: ImportProgress) => void;
 };
 
+export type ExportOptions = {
+  includeCueTokens?: boolean;
+};
+
 function stripPrefsForTransfer(prefs: UserPrefs): UserPrefs {
   return {
     ...prefs,
@@ -58,6 +63,84 @@ function stripPrefsForTransfer(prefs: UserPrefs): UserPrefs {
 
 function stripSessionForTransfer(session: RecentSessionRecord): RecentSessionRecord {
   return session;
+}
+
+function stripCueTokensForTransfer(cue: SubtitleCueRecord): SubtitleCueRecord {
+  const { tokens: _tokens, ...rest } = cue;
+  return rest;
+}
+
+function prepareSubtitleCuesForExport(
+  subtitleCues: SubtitleCueRecord[],
+  options?: ExportOptions
+): SubtitleCueRecord[] {
+  if (options?.includeCueTokens) {
+    return subtitleCues;
+  }
+  return subtitleCues.map(stripCueTokensForTransfer);
+}
+
+function ensureCueTokensForImport(cue: SubtitleCueRecord): SubtitleCueRecord {
+  if (Array.isArray(cue.tokens)) {
+    return cue;
+  }
+  const rawText = typeof cue.rawText === "string" ? cue.rawText : "";
+  return {
+    ...cue,
+    rawText,
+    tokens: tokenize(rawText),
+  };
+}
+
+function isValidSubtitleCueRecord(cue: SubtitleCueRecord): boolean {
+  return (
+    Number.isInteger(cue.index) &&
+    cue.index >= 0 &&
+    Number.isFinite(cue.startMs) &&
+    cue.startMs >= 0 &&
+    Number.isFinite(cue.endMs) &&
+    cue.endMs >= cue.startMs &&
+    typeof cue.rawText === "string" &&
+    cue.rawText.trim().length > 0 &&
+    typeof cue.fileHash === "string" &&
+    cue.fileHash.length > 0 &&
+    typeof cue.id === "string" &&
+    cue.id.length > 0
+  );
+}
+
+function sanitizeCueCount(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return 0;
+  }
+  return Math.floor(value);
+}
+
+function sanitizeSubtitleTransferData(
+  subtitleFiles: SubtitleFile[],
+  subtitleCues: SubtitleCueRecord[]
+): { subtitleFiles: SubtitleFile[]; subtitleCues: SubtitleCueRecord[] } {
+  const validSubtitleCues = subtitleCues.map(ensureCueTokensForImport).filter(isValidSubtitleCueRecord);
+  const cueCountsByHash = new Map<string, number>();
+
+  for (const cue of validSubtitleCues) {
+    cueCountsByHash.set(cue.fileHash, (cueCountsByHash.get(cue.fileHash) ?? 0) + 1);
+  }
+
+  const validSubtitleFiles = subtitleFiles
+    .filter((file) => cueCountsByHash.has(file.bytesHash))
+    .map((file) => {
+      const cueCount = cueCountsByHash.get(file.bytesHash) ?? 0;
+      return {
+        ...file,
+        totalCues: Math.max(sanitizeCueCount(file.totalCues), cueCount),
+      };
+    });
+
+  return {
+    subtitleFiles: validSubtitleFiles,
+    subtitleCues: validSubtitleCues,
+  };
 }
 
 function ensureArray<T>(value: unknown): T[] {
@@ -134,8 +217,10 @@ function buildBackupSummary(
 export function summarizeBackup(input: unknown): BackupSummary {
   const data = extractBackupData(input);
   const words = ensureArray<UnknownWord>(data.words);
-  const subtitleFiles = ensureArray<SubtitleFile>(data.subtitleFiles);
-  const subtitleCues = ensureArray<SubtitleCueRecord>(data.subtitleCues);
+  const { subtitleFiles, subtitleCues } = sanitizeSubtitleTransferData(
+    ensureArray<SubtitleFile>(data.subtitleFiles),
+    ensureArray<SubtitleCueRecord>(data.subtitleCues)
+  );
   const prefs =
     data.prefs && typeof data.prefs === "object"
       ? stripPrefsForTransfer(data.prefs as UserPrefs)
@@ -272,7 +357,9 @@ async function bulkPutChunked<T extends { id: string }>(
   }
 }
 
-export async function exportAllData(): Promise<{ payload: BackupPayload; counts: BackupCounts }> {
+export async function exportAllData(
+  options?: ExportOptions
+): Promise<{ payload: BackupPayload; counts: BackupCounts }> {
   const [words, subtitleFiles, subtitleCues, prefsRecord, sessions] = await Promise.all([
     withDb([], () => db.words.toArray()),
     withDb([], () => db.subtitleFiles.toArray()),
@@ -283,6 +370,7 @@ export async function exportAllData(): Promise<{ payload: BackupPayload; counts:
 
   const prefs = prefsRecord?.value ? stripPrefsForTransfer(prefsRecord.value) : undefined;
   const safeSessions = sessions.map(stripSessionForTransfer);
+  const transferSubtitleCues = prepareSubtitleCuesForExport(subtitleCues, options);
 
   const payload: BackupPayload = {
     version: 1,
@@ -290,7 +378,7 @@ export async function exportAllData(): Promise<{ payload: BackupPayload; counts:
     data: {
       words,
       subtitleFiles,
-      subtitleCues,
+      subtitleCues: transferSubtitleCues,
       prefs,
       sessions: safeSessions,
     },
@@ -335,8 +423,10 @@ export async function importAllData(
   }
 
   const words = ensureArray<UnknownWord>(data.words);
-  const subtitleFiles = ensureArray<SubtitleFile>(data.subtitleFiles);
-  const subtitleCues = ensureArray<SubtitleCueRecord>(data.subtitleCues);
+  const { subtitleFiles, subtitleCues } = sanitizeSubtitleTransferData(
+    ensureArray<SubtitleFile>(data.subtitleFiles),
+    ensureArray<SubtitleCueRecord>(data.subtitleCues)
+  );
   const prefs =
     data.prefs && typeof data.prefs === "object"
       ? stripPrefsForTransfer(data.prefs as UserPrefs)
