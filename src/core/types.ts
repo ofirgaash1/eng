@@ -39,6 +39,33 @@ export interface Token {
   isWord: boolean;
 }
 
+export interface CandidateWordSource {
+  id: string;
+  normalized: string;
+  stem: string;
+  fileHash: string;
+  count: number;
+  example: string;
+  updatedAt: number;
+}
+
+export type WordDecision = "unknown" | "known" | "ignored";
+
+export interface WordDecisionRecord {
+  normalized: string;
+  decision: WordDecision;
+  updatedAt: number;
+}
+
+export interface CandidateWordStat {
+  normalized: string;
+  stem: string;
+  subtitleCount: number;
+  sourceCount: number;
+  example: string;
+  updatedAt: number;
+}
+
 export interface ShortcutBinding {
   code: string;
   label: string;

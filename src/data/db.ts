@@ -5,6 +5,8 @@ import type {
   SubtitleFile,
   UnknownWord,
   UserPrefs,
+  CandidateWordSource,
+  WordDecisionRecord,
 } from "../core/types";
 
 export interface PrefsRecord {
@@ -19,6 +21,8 @@ export class SubtitleLearnerDB extends Dexie {
   subtitleCues!: Table<SubtitleCueRecord, string>;
   prefs!: Table<PrefsRecord, string>;
   sessions!: Table<RecentSessionRecord, string>;
+  candidateWordSources!: Table<CandidateWordSource, string>;
+  wordDecisions!: Table<WordDecisionRecord, string>;
 
   constructor() {
     super("subtitle-learner");
@@ -97,6 +101,16 @@ export class SubtitleLearnerDB extends Dexie {
           });
           return tx.table("sessions").clear().then(() => tx.table("sessions").bulkPut(sanitized));
         });
+    });
+
+    this.version(6).stores({
+      words: "&id, normalized, stem, updatedAt",
+      subtitleFiles: "&id, bytesHash, addedAt",
+      prefs: "&id, updatedAt",
+      subtitleCues: "&id, fileHash, index",
+      sessions: "&id, updatedAt",
+      candidateWordSources: "&id, normalized, stem, fileHash, updatedAt",
+      wordDecisions: "&normalized, decision, updatedAt",
     });
   }
 }

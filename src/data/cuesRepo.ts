@@ -1,5 +1,6 @@
 import type { Cue, SubtitleCueRecord } from "../core/types";
 import { db, withDb, withDbVoid } from "./db";
+import { indexCandidateWordsForFile } from "./candidateWordsRepo";
 
 function isValidCue(cue: Cue): boolean {
   return (
@@ -68,6 +69,7 @@ export async function saveCuesForFile(fileHash: string, cues: Cue[]): Promise<vo
       }
     })
   );
+  await indexCandidateWordsForFile(fileHash, validCues);
 }
 
 export async function deleteCuesForFile(fileHash: string): Promise<void> {
