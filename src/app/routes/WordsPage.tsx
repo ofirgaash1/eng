@@ -84,10 +84,7 @@ export default function WordsPage() {
   const [isReanalyzing, setIsReanalyzing] = useState(false);
   const [isRebuildingInbox, setIsRebuildingInbox] = useState(false);
   const [mode, setMode] = useState<PageMode>("unknowns");
-  const [minLen, setMinLen] = useState(3);
-  const [hideResolved, setHideResolved] = useState(true);
-  const [excludeCommonThreshold, setExcludeCommonThreshold] = useState(1000);
-  const [excludeProperNouns, setExcludeProperNouns] = useState(true);
+  const [excludeCommonThreshold, setExcludeCommonThreshold] = useState(20000);
   const [visibleColumns] = useState<Record<ViewColumn, boolean>>({
     word: true,
     originalSentence: true,
@@ -182,29 +179,25 @@ export default function WordsPage() {
 
   const inboxRows = useMemo(() => {
     return candidateWords
-      .filter((candidate) => candidate.normalized.length >= minLen)
-      .filter((candidate) => !excludeProperNouns || candidate.normalized[0] !== candidate.normalized[0]?.toUpperCase())
+      .filter((candidate) => !/[֐-׿]/u.test(candidate.normalized))
       .filter((candidate) => {
         const rank = candidateRank(candidate, frequencyRanks);
         if (!rank) return true;
         return rank > excludeCommonThreshold;
       })
       .filter((candidate) => !unknownNormalized.has(candidate.normalized))
-      .filter((candidate) => {
-        if (!hideResolved) return true;
-        return !decisions[candidate.normalized];
-      })
+      .filter((candidate) => !decisions[candidate.normalized])
       .map((candidate) => ({ candidate, rank: candidateRank(candidate, frequencyRanks), decision: decisions[candidate.normalized] ?? null }))
       .sort((a, b) => {
-        const aRank = typeof a.rank === "number" ? a.rank : Number.POSITIVE_INFINITY;
-        const bRank = typeof b.rank === "number" ? b.rank : Number.POSITIVE_INFINITY;
-        if (aRank !== bRank) return aRank - bRank;
+        const aRank = typeof a.rank === "number" ? a.rank : Number.NEGATIVE_INFINITY;
+        const bRank = typeof b.rank === "number" ? b.rank : Number.NEGATIVE_INFINITY;
+        if (aRank !== bRank) return bRank - aRank;
         if (a.candidate.subtitleCount !== b.candidate.subtitleCount) {
           return b.candidate.subtitleCount - a.candidate.subtitleCount;
         }
         return a.candidate.normalized.localeCompare(b.candidate.normalized);
       });
-  }, [candidateWords, decisions, excludeCommonThreshold, excludeProperNouns, frequencyRanks, hideResolved, minLen, unknownNormalized]);
+  }, [candidateWords, decisions, excludeCommonThreshold, frequencyRanks, unknownNormalized]);
 
   const handleSortFieldChange = useCallback((next: SortField) => {
     setSortField(next);
@@ -345,20 +338,8 @@ export default function WordsPage() {
               {isRebuildingInbox ? "Rebuilding…" : "Rebuild Inbox"}
             </button>
             <label className="flex items-center gap-1">
-              Min len
-              <input type="number" className="w-16 rounded border border-white/10 bg-slate-900/80 px-2 py-1" value={minLen} min={1} max={15} onChange={(e) => setMinLen(Number(e.target.value) || 1)} />
-            </label>
-            <label className="flex items-center gap-1">
               Exclude top rank ≤
               <input type="number" className="w-20 rounded border border-white/10 bg-slate-900/80 px-2 py-1" value={excludeCommonThreshold} min={0} onChange={(e) => setExcludeCommonThreshold(Number(e.target.value) || 0)} />
-            </label>
-            <label className="flex items-center gap-1">
-              <input type="checkbox" checked={excludeProperNouns} onChange={() => setExcludeProperNouns((v) => !v)} />
-              Exclude proper nouns
-            </label>
-            <label className="flex items-center gap-1">
-              <input type="checkbox" checked={hideResolved} onChange={() => setHideResolved((v) => !v)} />
-              Hide resolved
             </label>
             <span>{inboxRows.length} candidates</span>
           </div>

@@ -51,8 +51,13 @@ describe("stem", () => {
       ["stoked", "stoke"],
       ["strutting", "strut"],
       ["nauseated", "nauseate"],
-      ["divulging", "divulge"],
+      ["divulging", "divulg"],
       ["bugging", "bug"],
+      ["opposed", "oppose"],
+      ["tortured", "torture"],
+      ["automatically", "automatic"],
+      ["everything's", "everything"],
+      ["thieves", "thief"],
     ];
 
     cases.forEach(([input, expected]) => {
