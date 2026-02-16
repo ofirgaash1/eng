@@ -58,6 +58,22 @@ describe("stem", () => {
       ["automatically", "automatic"],
       ["everything's", "everything"],
       ["thieves", "thief"],
+      ["cheated", "cheat"],
+      ["cheating", "cheat"],
+      ["dangled", "dangle"],
+      ["mcgarr", "mcgarr"],
+      ["greenbay", "greenbay"],
+      ["amusing", "amuse"],
+      ["oldrich", "oldrich"],
+      ["gallows", "gallows"],
+      ["ignored", "ignore"],
+      ["eating", "eat"],
+      ["cruising", "cruise"],
+      ["splutters", "splutter"],
+      ["gilos", "gilos"],
+      ["prepared", "prepare"],
+      ["patronise", "patronise"],
+      ["decided", "decide"],
     ];
 
     cases.forEach(([input, expected]) => {

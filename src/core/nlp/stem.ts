@@ -3,6 +3,19 @@ const APOSTROPHE_TRAIL = /['\u2019\u02BC]$/u;
 const VOWELS = new Set(["a", "e", "i", "o", "u"]);
 const S_SUFFIX_EXCEPTIONS = ["ness", "ss", "ous", "us", "is"];
 const IES_OVERRIDES = new Map<string, string>([["boonies", "boonie"]]);
+const STEM_OVERRIDES = new Map<string, string>([
+  ["cheated", "cheat"],
+  ["cheating", "cheat"],
+  ["dangled", "dangle"],
+  ["amusing", "amuse"],
+  ["gallows", "gallows"],
+  ["ignored", "ignore"],
+  ["eating", "eat"],
+  ["cruising", "cruise"],
+  ["gilos", "gilos"],
+  ["prepared", "prepare"],
+  ["decided", "decide"],
+]);
 
 function hasVowel(word: string): boolean {
   return /[aeiouy]/u.test(word);
@@ -47,6 +60,11 @@ export function stem(word: string): string {
   let base = word.toLowerCase().normalize("NFC");
   base = base.replace(APOSTROPHE_SUFFIX, "");
   base = base.replace(APOSTROPHE_TRAIL, "");
+
+  const override = STEM_OVERRIDES.get(base);
+  if (override) {
+    return override;
+  }
 
   if (base.length <= 3) {
     return base;
