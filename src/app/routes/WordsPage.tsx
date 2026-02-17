@@ -16,6 +16,8 @@ type ViewColumn =
   | "stem"
   | "frequencyRank"
   | "updatedAt"
+  | "subtitleCount"
+  | "sourceCount"
   | "actions";
 
 type PageMode = "unknowns" | "inbox";
@@ -29,9 +31,10 @@ interface WordRowProps {
   frequencyRank: number | null;
   onDelete: (id: string) => Promise<void>;
   visibleColumns: Record<ViewColumn, boolean>;
+  usageStats: { subtitleCount: number; sourceCount: number };
 }
 
-function WordRow({ word, frequencyRank, onDelete, visibleColumns }: WordRowProps) {
+function WordRow({ word, frequencyRank, onDelete, visibleColumns, usageStats }: WordRowProps) {
   return (
     <tr className="hover:bg-white/5">
       {visibleColumns.word && <td className="px-4 py-2 font-medium">{word.original}</td>}
@@ -48,6 +51,13 @@ function WordRow({ word, frequencyRank, onDelete, visibleColumns }: WordRowProps
         </td>
       )}
       {visibleColumns.updatedAt && <td className="px-4 py-2 text-right text-white/60">{new Date(word.updatedAt).toLocaleString()}</td>}
+
+      {visibleColumns.subtitleCount && (
+        <td className="px-4 py-2 text-right text-white/70">{usageStats.subtitleCount.toLocaleString()}</td>
+      )}
+      {visibleColumns.sourceCount && (
+        <td className="px-4 py-2 text-right text-white/70">{usageStats.sourceCount.toLocaleString()}</td>
+      )}
       {visibleColumns.actions && (
         <td className="px-4 py-2 text-right">
           <button
@@ -96,6 +106,8 @@ export default function WordsPage() {
     stem: true,
     frequencyRank: true,
     updatedAt: false,
+    subtitleCount: false,
+    sourceCount: false,
     actions: true,
   });
   const [isViewMenuOpen, setIsViewMenuOpen] = useState(false);
@@ -106,8 +118,8 @@ export default function WordsPage() {
     word: true,
     stem: true,
     frequencyRank: true,
-    subtitleCount: true,
-    sourceCount: true,
+    subtitleCount: false,
+    sourceCount: false,
     example: true,
     actions: true,
   });
@@ -214,6 +226,17 @@ export default function WordsPage() {
   }, [ranksById, sortDirection, sortField, words]);
 
   const unknownNormalized = useMemo(() => new Set(words.map((word) => word.normalized)), [words]);
+  const usageByNormalized = useMemo(() => {
+    const map = new Map<string, { subtitleCount: number; sourceCount: number }>();
+    for (const candidate of candidateWords) {
+      map.set(candidate.normalized, {
+        subtitleCount: candidate.subtitleCount,
+        sourceCount: candidate.sourceCount,
+      });
+    }
+    return map;
+  }, [candidateWords]);
+
 
   const inboxRows = useMemo(() => {
     const direction = inboxSortDirection === "asc" ? 1 : -1;
@@ -400,6 +423,8 @@ export default function WordsPage() {
                         ["stem", "Stem"],
                         ["frequencyRank", "Frequency Rank"],
                         ["updatedAt", "Updated"],
+                        ["subtitleCount", "Subtitle freq"],
+                        ["sourceCount", "Source count"],
                         ["actions", "Actions"],
                       ] as const
                     ).map(([key, label]) => (
@@ -476,12 +501,21 @@ export default function WordsPage() {
                         </button>
                       </th>
                     )}
+                    {visibleColumns.subtitleCount && <th className="px-4 py-2 text-right">Subtitle freq</th>}
+                    {visibleColumns.sourceCount && <th className="px-4 py-2 text-right">Source count</th>}
                     {visibleColumns.actions && <th className="px-4 py-2 text-right">Actions</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/10 text-sm">
                   {unknownsSorted.map((word) => (
-                    <WordRow key={word.id} word={word} frequencyRank={ranksById.get(word.id) ?? null} onDelete={removeWord} visibleColumns={visibleColumns} />
+                    <WordRow
+                      key={word.id}
+                      word={word}
+                      frequencyRank={ranksById.get(word.id) ?? null}
+                      onDelete={removeWord}
+                      visibleColumns={visibleColumns}
+                      usageStats={usageByNormalized.get(word.normalized) ?? { subtitleCount: 0, sourceCount: 0 }}
+                    />
                   ))}
                 </tbody>
               </table>

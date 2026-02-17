@@ -10,15 +10,10 @@ import {
 import { useDictionaryStore } from "../../state/dictionaryStore";
 import { usePrefsStore } from "../../state/prefsStore";
 import { useSessionStore } from "../../state/sessionStore";
-import type { Cue, Token, UserPrefs } from "../../core/types";
+import type { Cue, Token } from "../../core/types";
 import { tokenize } from "../../core/nlp/tokenize";
-import {
-  buildDisplayTokens,
-  isWordLikeToken,
-  shouldAddSpaceBefore,
-  tokenizeWithItalics,
-} from "../../core/subtitles/displayTokens";
-import { handlePlayerKeyDown } from "./playerShortcuts";
+import { SubtitleCue, SubtitleCueBackground } from "./player/SubtitleOverlay";
+import { usePlayerShortcuts } from "./player/usePlayerShortcuts";
 import { formatTimeMs } from "../../utils/timeFormat";
 import { hashBlob, readSubtitleText } from "../../utils/file";
 import { upsertSubtitleFile } from "../../data/filesRepo";
@@ -26,17 +21,28 @@ import { getCuesForFile, saveCuesForFile } from "../../data/cuesRepo";
 import { getLastSession, saveLastSession } from "../../data/sessionRepo";
 import { parseSrt } from "../../core/parsing/srtParser";
 
+
+type WorkerResponse = {
+  id: string;
+  cues: Cue[];
+  error?: string;
+};
 const RTL_TEXT_RE = /[\u0591-\u07FF\uFB1D-\uFDFD\uFE70-\uFEFC]/;
-const RTL_LEADING_PUNCT_RE = /^[.!?…،؛؟]+$/u;
 const VOLUME_STEPS = [1, 2, 3, 4, 5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100];
 const INVALID_SUBTITLE_MESSAGE = "No valid subtitle cues found. Use a valid .srt file.";
+// layering markers: pointer-events-none flex flex-wrap | pointer-events-auto relative z-50
 
 function detectRtlFromCues(cues: Cue[]): boolean {
   return cues.some((cue) => RTL_TEXT_RE.test(cue.rawText));
 }
 
-function shouldMoveLeadingPunctuation(token: Token): boolean {
-  return !token.isWord && RTL_LEADING_PUNCT_RE.test(token.text);
+
+
+function ensureParsedSubtitleCues(cues: Cue[]): Cue[] {
+  if (cues.length === 0) {
+    throw new Error(INVALID_SUBTITLE_MESSAGE);
+  }
+  return cues;
 }
 
 function openDefinitionSearch(word: string) {
@@ -46,148 +52,7 @@ function openDefinitionSearch(word: string) {
   window.open(`https://www.google.com/search?q=${encoded}`, "_blank", "noopener,noreferrer");
 }
 
-interface SubtitleCueProps {
-  cue: Cue;
-  onTokenClick: (token: Token, cue: Cue) => void;
-  onTokenContextMenu: (token: Token, cue: Cue) => void;
-  classForToken: (token: Token) => string;
-  isRtl?: boolean;
-  className?: string;
-}
-
-type WorkerResponse = {
-  id: string;
-  cues: Cue[];
-  error?: string;
-};
-
-type ShortcutAction = keyof NonNullable<UserPrefs["playerShortcuts"]>;
-
-const INTERACTIVE_TAGS = ["INPUT", "TEXTAREA", "SELECT", "BUTTON", "SUMMARY"];
-
-function isInteractiveTarget(target: EventTarget | null): boolean {
-  if (typeof HTMLElement === "undefined") return false;
-  if (!(target instanceof HTMLElement)) return false;
-  if (target.isContentEditable) return true;
-  return INTERACTIVE_TAGS.includes(target.tagName);
-}
-
-function formatShortcutLabel(event: KeyboardEvent): string {
-  if (event.key === " ") return "Space";
-  if (event.key === "Escape") return "Esc";
-  if (event.key.startsWith("Arrow")) return event.key.replace("Arrow", "Arrow ");
-  if (event.key.length === 1) return event.key.toUpperCase();
-  return event.key;
-}
-
-function stopShortcutEvent(event: KeyboardEvent) {
-  event.preventDefault();
-  event.stopPropagation();
-  if (typeof event.stopImmediatePropagation === "function") {
-    event.stopImmediatePropagation();
-  }
-}
-
-function ensureParsedSubtitleCues(cues: Cue[]): Cue[] {
-  if (cues.length === 0) {
-    throw new Error(INVALID_SUBTITLE_MESSAGE);
-  }
-  return cues;
-}
-
-function useDisplayTokens(cue: Cue, isRtl: boolean) {
-  const tokens = useMemo(() => tokenizeWithItalics(cue.rawText), [cue.rawText]);
-  const normalizedTokens = useMemo(() => {
-    if (!isRtl) return tokens;
-    const firstWordIndex = tokens.findIndex((token) => isWordLikeToken(token.token));
-    if (firstWordIndex <= 0) return tokens;
-    const leading = tokens.slice(0, firstWordIndex);
-    if (leading.length === 0) return tokens;
-    if (leading.every((token) => shouldMoveLeadingPunctuation(token.token))) {
-      return [...tokens.slice(firstWordIndex), ...leading];
-    }
-    return tokens;
-  }, [isRtl, tokens]);
-  return useMemo(() => buildDisplayTokens(normalizedTokens, { isRtl }), [normalizedTokens, isRtl]);
-}
-
-export function SubtitleCue({
-  cue,
-  onTokenClick,
-  onTokenContextMenu,
-  classForToken,
-  isRtl = false,
-  className,
-}: SubtitleCueProps) {
-  const displayTokens = useDisplayTokens(cue, isRtl);
-  return (
-    <div
-      className={`pointer-events-none flex flex-wrap ${className ?? ""}`}
-      dir={isRtl ? "rtl" : "ltr"}
-    >
-      {displayTokens.map((displayToken, index) => {
-        const prevToken = index > 0 ? displayTokens[index - 1].token : undefined;
-        const token = displayToken.token;
-        const spacingClass = shouldAddSpaceBefore(prevToken, token) ? "ms-1" : "";
-        return (
-          <button
-            key={`${displayToken.text}-${index}`}
-            type="button"
-            className={`pointer-events-auto relative z-50 rounded px-0.5 text-left ${spacingClass} ${
-              token.isWord ? "focus:outline-none focus-visible:outline-none" : "cursor-default"
-            }`}
-            onClick={(event) => {
-              if (!token.isWord) return;
-              onTokenClick(token, cue);
-              if (event.currentTarget instanceof HTMLElement) {
-                event.currentTarget.blur();
-              }
-            }}
-            onContextMenu={(event) => {
-              if (!token.isWord) return;
-              event.preventDefault();
-              onTokenContextMenu(token, cue);
-            }}
-            disabled={!token.isWord}
-          >
-            <span
-              className={`rounded px-1 py-0.5 transition-colors ${
-                displayToken.italic ? "italic" : ""
-              } ${classForToken(token)}`}
-            >
-              {displayToken.text}
-            </span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function SubtitleCueBackground({
-  cue,
-  isRtl = false,
-  className,
-}: Pick<SubtitleCueProps, "cue" | "isRtl" | "className">) {
-  const displayTokens = useDisplayTokens(cue, isRtl);
-  return (
-    <div className={`flex flex-wrap ${className ?? ""}`} dir={isRtl ? "rtl" : "ltr"}>
-      {displayTokens.map((displayToken, index) => {
-        const prevToken = index > 0 ? displayTokens[index - 1].token : undefined;
-        const token = displayToken.token;
-        const spacingClass = shouldAddSpaceBefore(prevToken, token) ? "ms-1" : "";
-        return (
-          <span
-            key={`${displayToken.text}-${index}`}
-            className={`rounded px-1 py-0.5 ${spacingClass}`}
-          >
-            {displayToken.text}
-          </span>
-        );
-      })}
-    </div>
-  );
-}
+export { SubtitleCue, SubtitleCueBackground };
 
 export default function PlayerPage({ isActive = true }: { isActive?: boolean }) {
   const playerContainerRef = useRef<HTMLDivElement | null>(null);
@@ -228,7 +93,6 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
   const [showControls, setShowControls] = useState<boolean>(true);
   const [showCursor, setShowCursor] = useState<boolean>(true);
   const [skipSubtitleGaps, setSkipSubtitleGaps] = useState<boolean>(false);
-  const [listeningShortcut, setListeningShortcut] = useState<ShortcutAction | null>(null);
   const [pendingVideoName, setPendingVideoName] = useState<string | null>(null);
   const hideControlsTimeoutRef = useRef<number | null>(null);
   const hideCursorTimeoutRef = useRef<number | null>(null);
@@ -1271,137 +1135,29 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
 
   const shortcutBindings = useMemo(() => playerShortcuts ?? {}, [playerShortcuts]);
 
-  const handleShortcutEditToggle = useCallback((action: ShortcutAction) => {
-    setListeningShortcut((previous) => (previous === action ? null : action));
-  }, []);
-
-  const getShortcutLabel = useCallback(
-    (action: ShortcutAction) =>
-      listeningShortcut === action ? "Press a key…" : shortcutBindings[action]?.label ?? "None",
-    [listeningShortcut, shortcutBindings],
-  );
-
-  useEffect(() => {
-    if (!listeningShortcut) return;
-    const handleShortcutCapture = (event: KeyboardEvent) => {
-      if (event.altKey || event.ctrlKey || event.metaKey) return;
-      stopShortcutEvent(event);
-      if (event.key === "Escape") {
-        setListeningShortcut(null);
-        return;
-      }
-      if (event.key === "Backspace" || event.key === "Delete") {
-        const updates: Partial<NonNullable<UserPrefs["playerShortcuts"]>> = {
-          [listeningShortcut]: undefined,
-        };
-        void updatePlayerShortcuts(updates);
-        setListeningShortcut(null);
-        return;
-      }
-      if (event.key === "Shift" || event.key === "Alt" || event.key === "Control" || event.key === "Meta") {
-        return;
-      }
-      const updates: Partial<NonNullable<UserPrefs["playerShortcuts"]>> = {
-        [listeningShortcut]: { code: event.code, label: formatShortcutLabel(event) },
-      };
-      void updatePlayerShortcuts(updates);
-      setListeningShortcut(null);
-    };
-    document.addEventListener("keydown", handleShortcutCapture, true);
-    return () => {
-      document.removeEventListener("keydown", handleShortcutCapture, true);
-    };
-  }, [listeningShortcut, updatePlayerShortcuts]);
-
-  const handleCustomShortcutKeyDown = useCallback(
-    (event: KeyboardEvent) => {
-      if (listeningShortcut) return false;
-      if (isInteractiveTarget(event.target)) return false;
-      if (event.altKey || event.ctrlKey || event.metaKey) return false;
-      const handlers: Partial<Record<ShortcutAction, () => void>> = {
-        mainSubtitleOffsetBack: () => {
-          adjustSubtitleOffset(-500);
-        },
-        mainSubtitleOffsetForward: () => {
-          adjustSubtitleOffset(500);
-        },
-        secondarySubtitleOffsetBack: () => {
-          adjustSecondarySubtitleOffset(-500);
-        },
-        secondarySubtitleOffsetForward: () => {
-          adjustSecondarySubtitleOffset(500);
-        },
-        toggleSecondarySubtitle: () => {
-          toggleSecondarySubtitle();
-        },
-        jumpNextSentence: () => {
-          jumpToNextSentence();
-        },
-        jumpPrevSentence: () => {
-          jumpToPreviousSentence();
-        },
-        toggleMainSubtitleRtl: () => {
-          setIsSubtitleRtl((previous) => !previous);
-        },
-        toggleSecondarySubtitleRtl: () => {
-          setIsSecondarySubtitleRtl((previous) => !previous);
-        },
-        toggleSkipSubtitleGaps: () => {
-          setSkipSubtitleGaps((previous) => !previous);
-        },
-      };
-      for (const [action, handler] of Object.entries(handlers) as [
-        ShortcutAction,
-        () => void,
-      ][]) {
-        const binding = shortcutBindings[action];
-        if (binding && binding.code === event.code) {
-          stopShortcutEvent(event);
-          handler();
-          focusPlayerContainer();
-          return true;
-        }
-      }
-      return false;
-    },
-    [
-      adjustSecondarySubtitleOffset,
-      adjustSubtitleOffset,
-      focusPlayerContainer,
-      jumpToNextSentence,
-      jumpToPreviousSentence,
-      listeningShortcut,
-      shortcutBindings,
-      toggleSecondarySubtitle,
-    ],
-  );
-
-  const handleShortcutKeyDown = useCallback(
-    (event: KeyboardEvent) => {
-      const customHandled = handleCustomShortcutKeyDown(event);
-      if (customHandled) return true;
-      return handlePlayerKeyDown(event, {
-        video: videoRef.current,
+  const { listeningShortcut, handleShortcutEditToggle, getShortcutLabel, handleShortcutKeyDown } =
+    usePlayerShortcuts({
+      isActive,
+      playerShortcuts,
+      updatePlayerShortcuts,
+      callbacks: {
+        adjustSubtitleOffset,
+        adjustSecondarySubtitleOffset,
+        toggleSecondarySubtitle,
+        jumpToNextSentence,
+        jumpToPreviousSentence,
+        toggleMainSubtitleRtl: () => setIsSubtitleRtl((previous) => !previous),
+        toggleSecondarySubtitleRtl: () => setIsSecondarySubtitleRtl((previous) => !previous),
+        toggleSkipSubtitleGaps: () => setSkipSubtitleGaps((previous) => !previous),
+        focusPlayerContainer,
         seekBy,
         toggleFullscreen,
         toggleMute,
         togglePlayback,
-        toggleSecondarySubtitle,
         stepVolume,
-        ignoreSecondarySubtitleShortcut: Boolean(shortcutBindings.toggleSecondarySubtitle),
-      });
-    },
-    [
-      handleCustomShortcutKeyDown,
-      seekBy,
-      shortcutBindings,
-      stepVolume,
-      toggleFullscreen,
-      toggleMute,
-      togglePlayback,
-      toggleSecondarySubtitle,
-    ],
-  );
+        video: videoRef.current,
+      },
+    });
 
   const handleShortcutKeyDownCapture = useCallback(
     (event: ReactKeyboardEvent<HTMLElement>) => {
@@ -1413,14 +1169,6 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
     },
     [handleShortcutKeyDown],
   );
-
-  useEffect(() => {
-    if (!isActive) return;
-    document.addEventListener("keydown", handleShortcutKeyDown, true);
-    return () => {
-      document.removeEventListener("keydown", handleShortcutKeyDown, true);
-    };
-  }, [handleShortcutKeyDown, isActive]);
 
   useEffect(() => {
     if (isActive) return;

@@ -70,13 +70,13 @@ type QuoteResult = {
 
 export default function QuotesPage() {
   const [selectedWordId, setSelectedWordId] = useState<string | null>(null);
-  const [contextRadius, setContextRadius] = useState<number>(1);
+  const [contextRadius, setContextRadius] = useState<number>(3);
   const [library, setLibrary] = useState<SubtitleFile[]>([]);
   const [libraryLoading, setLibraryLoading] = useState<boolean>(false);
   const [processingFiles, setProcessingFiles] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [cuesByHash, setCuesByHash] = useState<Record<string, Cue[]>>({});
-  const [showSubtitleSources, setShowSubtitleSources] = useState<boolean>(true);
+  const [showSubtitleSources, setShowSubtitleSources] = useState<boolean>(false);
   const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
   const [playbackStatus, setPlaybackStatus] = useState<string | null>(null);
@@ -546,15 +546,7 @@ export default function QuotesPage() {
                 ))
               )}
             </ul>
-          ) : (
-            <p className="mt-4 text-sm text-white/70">
-              {libraryLoading
-                ? "Loading files…"
-                : library.length === 0
-                  ? "No subtitle files stored yet."
-                  : `${library.length} subtitle file${library.length === 1 ? "" : "s"} stored. Expand to manage them.`}
-            </p>
-          )}
+          ) : null}
         </div>
         <div className="rounded-lg bg-black/40 p-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -564,10 +556,10 @@ export default function QuotesPage() {
               <select
                 value={contextRadius}
                 onChange={handleContextChange}
-                className="rounded-md border border-white/20 bg-white/5 px-2 py-1 focus:outline-none focus-visible:outline-none"
+                className="rounded-md border border-white/20 bg-white/5 px-2 py-1 text-white focus:outline-none focus-visible:outline-none"
               >
                 {CONTEXT_OPTIONS.map((option) => (
-                  <option key={option} value={option}>
+                  <option key={option} value={option} className="text-black">
                     {option}
                   </option>
                 ))}
@@ -620,9 +612,19 @@ export default function QuotesPage() {
                       </span>
                       <button
                         type="button"
-                        onClick={() => void handlePlayQuote(quote)}
-                        disabled={!mediaLibrary?.handle}
-                        className="rounded border border-white/20 bg-white/10 px-2 py-1 text-[11px] font-medium text-white transition hover:border-white/30 hover:bg-white/20 focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:border-white/10 disabled:text-white/40"
+                        onClick={() => {
+                          if (!mediaLibrary?.handle) {
+                            setPlaybackError("Select a media library folder in Settings to enable quote playback. Matching videos will be looked up by subtitle filename.");
+                            return;
+                          }
+                          void handlePlayQuote(quote);
+                        }}
+                        title={!mediaLibrary?.handle ? "Select a media library folder in Settings to enable quote playback. Matching videos will be looked up by subtitle filename." : undefined}
+                        className={`rounded border bg-white/10 px-2 py-1 text-[11px] font-medium text-white transition focus:outline-none focus-visible:outline-none ${
+                          mediaLibrary?.handle
+                            ? "border-white/20 hover:border-white/30 hover:bg-white/20"
+                            : "border-white/10 hover:border-white/20 hover:bg-white/15"
+                        }`}
                       >
                         Play quote
                       </button>
