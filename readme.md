@@ -2,6 +2,10 @@
 
 Local-first tool for studying vocabulary while watching movies with subtitle files. The app parses SRT cues, tokenizes words, and highlights anything you've marked as unknown so you can focus on learning while you watch.
 
+## Live app
+
+👉 **https://ofirgaash1.github.io/eng/help**
+
 ## Current status
 
 The following slices are already implemented:
@@ -19,7 +23,7 @@ Focus development on the unfinished pieces below.
 
 - [x] Allow loading a local video file and render subtitles in a custom overlay positioned on top of playback.
 - [x] Move dictionary, subtitle files, and preferences into Dexie-backed storage (schema + repositories).
-- [x] Build a word management table that supports editing translation/notes, updating status, and deleting entries.
+- [x] Build a word management table for unknown words plus Inbox triage (unknown/known/ignored), sorting, and deletes.
 - [x] Support export/import of the unknown words list as JSON (and optional CSV).
 - [x] Wire up a worker to parse + tokenize SRT files without blocking the UI and keep cached tokens per cue.
 - [x] Persist and restore the most recently opened video/subtitle combination.

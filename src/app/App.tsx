@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { NavLink, Route, Routes, useLocation } from "react-router-dom";
 import PlayerPage from "./routes/PlayerPage";
 import WordsPage from "./routes/WordsPage";
@@ -8,6 +8,7 @@ import StatsPage from "./routes/StatsPage";
 import VlsubPage from "./routes/VlsubPage";
 import HelpPage from "./routes/HelpPage";
 import { usePrefsStore } from "../state/prefsStore";
+import { dismissDbError, subscribeDbErrors, type DbErrorEvent } from "../data/dbErrorReporter";
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   `px-3 py-2 rounded-md text-sm font-medium transition-colors ${
@@ -16,6 +17,55 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
       : "text-white/70 hover:text-white hover:bg-white/5"
   }`;
 
+
+
+function DbErrorToasts() {
+  const [errors, setErrors] = useState<DbErrorEvent[]>([]);
+
+  useEffect(() => subscribeDbErrors(setErrors), []);
+
+  if (errors.length === 0) return null;
+
+  return (
+    <div className="fixed bottom-4 right-4 z-[1000] flex w-[min(28rem,calc(100vw-2rem))] flex-col gap-2">
+      {errors.map((error) => {
+        const payload = [
+          `Context: ${error.context}`,
+          `Message: ${error.message}`,
+          `Time: ${new Date(error.timestamp).toISOString()}`,
+          error.stack ? `Stack:
+${error.stack}` : undefined,
+        ]
+          .filter(Boolean)
+          .join("\n\n");
+        return (
+          <div key={error.id} className="rounded-lg border border-red-400/40 bg-slate-950/95 p-3 text-xs text-white shadow-xl">
+            <div className="font-semibold text-red-200">IndexedDB error</div>
+            <div className="mt-1 text-white/80">{error.context}: {error.message}</div>
+            <div className="mt-2 flex items-center gap-2">
+              <button
+                type="button"
+                className="rounded border border-white/20 px-2 py-1 text-[11px] text-white/90 hover:bg-white/10"
+                onClick={() => {
+                  void navigator.clipboard?.writeText(payload);
+                }}
+              >
+                Copy
+              </button>
+              <button
+                type="button"
+                className="rounded border border-white/10 px-2 py-1 text-[11px] text-white/70 hover:bg-white/10"
+                onClick={() => dismissDbError(error.id)}
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 export default function App() {
   const location = useLocation();
   const isPlayerRoute = location.pathname === "/" || location.pathname === "";
@@ -96,6 +146,7 @@ export default function App() {
           Local-first learning tool for movie subtitles.
         </footer>
       </div>
+      <DbErrorToasts />
     </div>
   );
 }

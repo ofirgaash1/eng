@@ -8,11 +8,32 @@ import type {
   CandidateWordSource,
   WordDecisionRecord,
 } from "../core/types";
+import { reportDbError } from "./dbErrorReporter";
 
 export interface PrefsRecord {
   id: string;
   value: UserPrefs;
   updatedAt: number;
+}
+
+function sanitizeWordRecords(records: UnknownWord[]): UnknownWord[] {
+  return records.map((word) => ({
+    id: word.id,
+    original: word.original,
+    originalSentence: word.originalSentence,
+    normalized: word.normalized,
+    stem: word.stem,
+    createdAt: word.createdAt,
+    updatedAt: word.updatedAt,
+  }));
+}
+
+async function sanitizeWordsTable(tx: unknown) {
+  const transaction = tx as { table: (name: string) => { toArray: () => Promise<unknown[]>; clear: () => Promise<void>; bulkPut: (records: unknown[]) => Promise<unknown>; }; };
+  const records = await transaction.table("words").toArray();
+  const sanitized = sanitizeWordRecords(records as UnknownWord[]);
+  await transaction.table("words").clear();
+  await transaction.table("words").bulkPut(sanitized);
 }
 
 export class SubtitleLearnerDB extends Dexie {
@@ -38,70 +59,47 @@ export class SubtitleLearnerDB extends Dexie {
       subtitleCues: "&id, fileHash, index",
       sessions: "&id, updatedAt",
     });
-    this.version(3).stores({
-      words: "&id, normalized, stem, updatedAt",
-      subtitleFiles: "&id, bytesHash, addedAt",
-      prefs: "&id, updatedAt",
-      subtitleCues: "&id, fileHash, index",
-      sessions: "&id, updatedAt",
-    });
-    this.version(3).upgrade((tx) => {
-      return tx.table("words").toArray().then((records) => {
-        const sanitized = records.map((word) => ({
-          id: word.id,
-          original: word.original,
-          originalSentence: word.originalSentence,
-          normalized: word.normalized,
-          stem: word.stem,
-          createdAt: word.createdAt,
-          updatedAt: word.updatedAt,
-        }));
-        return tx.table("words").clear().then(() => tx.table("words").bulkPut(sanitized));
-      });
-    });
-    this.version(4).stores({
-      words: "&id, normalized, stem, updatedAt",
-      subtitleFiles: "&id, bytesHash, addedAt",
-      prefs: "&id, updatedAt",
-      subtitleCues: "&id, fileHash, index",
-      sessions: "&id, updatedAt",
-    });
-    this.version(4).upgrade((tx) => {
-      return tx.table("words").toArray().then((records) => {
-        const sanitized = records.map((word) => ({
-          id: word.id,
-          original: word.original,
-          originalSentence: word.originalSentence,
-          normalized: word.normalized,
-          stem: word.stem,
-          createdAt: word.createdAt,
-          updatedAt: word.updatedAt,
-        }));
-        return tx.table("words").clear().then(() => tx.table("words").bulkPut(sanitized));
-      });
-    });
-    this.version(5).stores({
-      words: "&id, normalized, stem, updatedAt",
-      subtitleFiles: "&id, bytesHash, addedAt",
-      prefs: "&id, updatedAt",
-      subtitleCues: "&id, fileHash, index",
-      sessions: "&id, updatedAt",
-    });
-    this.version(5).upgrade((tx) => {
-      return tx
-        .table("sessions")
-        .toArray()
-        .then((records) => {
-          const sanitized = records.map((record) => {
-            if (!record || typeof record !== "object") {
-              return record;
-            }
-            const { videoBlob, ...rest } = record as { videoBlob?: Blob };
-            return rest;
+    this.version(3)
+      .stores({
+        words: "&id, normalized, stem, updatedAt",
+        subtitleFiles: "&id, bytesHash, addedAt",
+        prefs: "&id, updatedAt",
+        subtitleCues: "&id, fileHash, index",
+        sessions: "&id, updatedAt",
+      })
+      .upgrade((tx) => sanitizeWordsTable(tx));
+    this.version(4)
+      .stores({
+        words: "&id, normalized, stem, updatedAt",
+        subtitleFiles: "&id, bytesHash, addedAt",
+        prefs: "&id, updatedAt",
+        subtitleCues: "&id, fileHash, index",
+        sessions: "&id, updatedAt",
+      })
+      .upgrade((tx) => sanitizeWordsTable(tx));
+    this.version(5)
+      .stores({
+        words: "&id, normalized, stem, updatedAt",
+        subtitleFiles: "&id, bytesHash, addedAt",
+        prefs: "&id, updatedAt",
+        subtitleCues: "&id, fileHash, index",
+        sessions: "&id, updatedAt",
+      })
+      .upgrade((tx) => {
+        return tx
+          .table("sessions")
+          .toArray()
+          .then((records) => {
+            const sanitized = records.map((record) => {
+              if (!record || typeof record !== "object") {
+                return record;
+              }
+              const { videoBlob, ...rest } = record as { videoBlob?: Blob };
+              return rest;
+            });
+            return tx.table("sessions").clear().then(() => tx.table("sessions").bulkPut(sanitized));
           });
-          return tx.table("sessions").clear().then(() => tx.table("sessions").bulkPut(sanitized));
-        });
-    });
+      });
 
     this.version(6).stores({
       words: "&id, normalized, stem, updatedAt",
@@ -121,6 +119,19 @@ let dbReadyPromise: Promise<boolean> | null = null;
 let dbReady = false;
 let dbUnavailable = false;
 
+function logDbError(error: unknown, context: string) {
+  const message = error instanceof Error ? error.message : String(error);
+  reportDbError({
+    context,
+    message,
+    stack: error instanceof Error ? error.stack : undefined,
+  });
+  if (import.meta.env.DEV && import.meta.env.MODE !== "test") {
+    // eslint-disable-next-line no-console
+    console.error(`[db] ${context}:`, error);
+  }
+}
+
 export async function ensureDbReady(): Promise<boolean> {
   if (dbReady) return true;
   if (dbUnavailable) return false;
@@ -131,8 +142,9 @@ export async function ensureDbReady(): Promise<boolean> {
         dbReady = true;
         return true;
       })
-      .catch(() => {
+      .catch((error) => {
         dbUnavailable = true;
+        logDbError(error, "Failed to open IndexedDB");
         return false;
       });
   }
@@ -144,7 +156,8 @@ export async function withDb<T>(fallback: T, action: () => PromiseLike<T>): Prom
   if (!ready) return fallback;
   try {
     return await action();
-  } catch {
+  } catch (error) {
+    logDbError(error, "DB operation failed");
     return fallback;
   }
 }
@@ -154,8 +167,8 @@ export async function withDbVoid(action: () => PromiseLike<unknown> | void): Pro
   if (!ready) return;
   try {
     await action();
-  } catch {
-    // Swallow DB errors to avoid uncaught promise rejections in constrained environments.
+  } catch (error) {
+    logDbError(error, "DB operation failed");
   }
 }
 
