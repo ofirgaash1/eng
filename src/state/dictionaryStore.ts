@@ -1,6 +1,6 @@
 import { nanoid } from "nanoid";
 import { create } from "zustand";
-import type { Token, UnknownWord } from "../core/types";
+import type { CandidateWordStat, Token, UnknownWord, WordDecision } from "../core/types";
 import { stem } from "../core/nlp/stem";
 import { tokenize } from "../core/nlp/tokenize";
 import {
@@ -9,9 +9,12 @@ import {
   replaceAllWords,
   saveWord,
 } from "../data/wordsRepo";
+import { getWordDecisions, listCandidateWordSources, saveWordDecision } from "../data/candidateWordsRepo";
 
 interface DictionaryState {
   words: UnknownWord[];
+  candidateWords: CandidateWordStat[];
+  decisions: Record<string, WordDecision>;
   initialized: boolean;
   initialize: () => Promise<void>;
   addUnknownWordFromToken: (token: Token | string, originalSentence?: string) => Promise<void>;
@@ -20,6 +23,8 @@ interface DictionaryState {
   importWords: (words: ImportedUnknownWord[]) => Promise<void>;
   reanalyzeStems: () => Promise<void>;
   classForToken: (token: Token) => string;
+  refreshCandidateWords: () => Promise<void>;
+  setWordDecision: (normalized: string, decision: WordDecision) => Promise<void>;
 }
 
 export interface ImportedUnknownWord {
@@ -57,13 +62,47 @@ function applyStemAnalysis(words: UnknownWord[]) {
 
 export const useDictionaryStore = create<DictionaryState>((set, get) => ({
   words: [],
+  candidateWords: [],
+  decisions: {},
   initialized: false,
   initialize: async () => {
     if (get().initialized) return;
-    const stored = await getAllWords();
+    const [stored, candidateSources, decisionRows] = await Promise.all([
+      getAllWords(),
+      listCandidateWordSources(),
+      getWordDecisions(),
+    ]);
     const { next, changed } = applyStemAnalysis(stored);
     const sorted = sortWords(next);
-    set({ words: sorted, initialized: true });
+    const aggregate = new Map<string, CandidateWordStat>();
+    for (const source of candidateSources) {
+      const existing = aggregate.get(source.normalized);
+      if (existing) {
+        existing.subtitleCount += source.count;
+        existing.sourceCount += 1;
+        if (source.updatedAt > existing.updatedAt) {
+          existing.updatedAt = source.updatedAt;
+          existing.example = source.example || existing.example;
+          existing.stem = source.stem || existing.stem;
+        }
+      } else {
+        aggregate.set(source.normalized, {
+          normalized: source.normalized,
+          stem: source.stem,
+          subtitleCount: source.count,
+          sourceCount: 1,
+          example: source.example,
+          updatedAt: source.updatedAt,
+        });
+      }
+    }
+    const decisions = Object.fromEntries(decisionRows.map((row) => [row.normalized, row.decision] as const));
+    set({
+      words: sorted,
+      candidateWords: Array.from(aggregate.values()),
+      decisions,
+      initialized: true,
+    });
     if (changed) {
       await replaceAllWords(sorted);
     }
@@ -173,5 +212,39 @@ export const useDictionaryStore = create<DictionaryState>((set, get) => ({
       return "hl-variant text-white";
     }
     return "bg-transparent";
+  },
+  refreshCandidateWords: async () => {
+    const [candidateSources, decisionRows] = await Promise.all([
+      listCandidateWordSources(),
+      getWordDecisions(),
+    ]);
+    const aggregate = new Map<string, CandidateWordStat>();
+    for (const source of candidateSources) {
+      const existing = aggregate.get(source.normalized);
+      if (existing) {
+        existing.subtitleCount += source.count;
+        existing.sourceCount += 1;
+        if (source.updatedAt > existing.updatedAt) {
+          existing.updatedAt = source.updatedAt;
+          existing.example = source.example || existing.example;
+          existing.stem = source.stem || existing.stem;
+        }
+      } else {
+        aggregate.set(source.normalized, {
+          normalized: source.normalized,
+          stem: source.stem,
+          subtitleCount: source.count,
+          sourceCount: 1,
+          example: source.example,
+          updatedAt: source.updatedAt,
+        });
+      }
+    }
+    const decisions = Object.fromEntries(decisionRows.map((row) => [row.normalized, row.decision] as const));
+    set({ candidateWords: Array.from(aggregate.values()), decisions });
+  },
+  setWordDecision: async (normalized, decision) => {
+    set((state) => ({ decisions: { ...state.decisions, [normalized]: decision } }));
+    await saveWordDecision(normalized, decision);
   },
 }));

@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { UnknownWord } from "../../core/types";
+import type { CandidateWordStat, Cue, UnknownWord } from "../../core/types";
 import { useDictionaryStore } from "../../state/dictionaryStore";
 import { getFrequencyRankForWord, loadFrequencyRanks } from "../../utils/frequencyRanks";
+import { listSubtitleFiles } from "../../data/filesRepo";
+import { getCuesForFile } from "../../data/cuesRepo";
+import { rebuildAllCandidateWords } from "../../data/candidateWordsRepo";
+import { stem as stemWord } from "../../core/nlp/stem";
 
 type SortField = "alphabetical" | "updatedAt" | "frequencyRank";
 type SortDirection = "asc" | "desc";
@@ -13,6 +17,8 @@ type ViewColumn =
   | "frequencyRank"
   | "updatedAt"
   | "actions";
+
+type PageMode = "unknowns" | "inbox";
 
 interface WordRowProps {
   word: UnknownWord;
@@ -27,11 +33,7 @@ function WordRow({ word, frequencyRank, onDelete, visibleColumns }: WordRowProps
       {visibleColumns.word && <td className="px-4 py-2 font-medium">{word.original}</td>}
       {visibleColumns.originalSentence && (
         <td className="px-4 py-2 text-white/70">
-          {word.originalSentence ? (
-            <span className="block max-w-xl break-words">{word.originalSentence}</span>
-          ) : (
-            "—"
-          )}
+          {word.originalSentence ? <span className="block max-w-xl break-words">{word.originalSentence}</span> : "—"}
         </td>
       )}
       {visibleColumns.normalized && <td className="px-4 py-2 text-white/70">{word.normalized}</td>}
@@ -41,11 +43,7 @@ function WordRow({ word, frequencyRank, onDelete, visibleColumns }: WordRowProps
           {typeof frequencyRank === "number" ? `#${frequencyRank.toLocaleString()}` : "-"}
         </td>
       )}
-      {visibleColumns.updatedAt && (
-        <td className="px-4 py-2 text-right text-white/60">
-          {new Date(word.updatedAt).toLocaleString()}
-        </td>
-      )}
+      {visibleColumns.updatedAt && <td className="px-4 py-2 text-right text-white/60">{new Date(word.updatedAt).toLocaleString()}</td>}
       {visibleColumns.actions && (
         <td className="px-4 py-2 text-right">
           <button
@@ -63,6 +61,19 @@ function WordRow({ word, frequencyRank, onDelete, visibleColumns }: WordRowProps
   );
 }
 
+function candidateRank(candidate: CandidateWordStat, ranks: Map<string, number> | null) {
+  if (!ranks) return null;
+  const fakeWord = {
+    id: candidate.normalized,
+    original: candidate.normalized,
+    normalized: candidate.normalized,
+    stem: candidate.stem,
+    createdAt: candidate.updatedAt,
+    updatedAt: candidate.updatedAt,
+  };
+  return getFrequencyRankForWord(fakeWord, ranks);
+}
+
 export default function WordsPage() {
   const [importError, setImportError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
@@ -71,7 +82,10 @@ export default function WordsPage() {
   const [sortField, setSortField] = useState<SortField>("updatedAt");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [isReanalyzing, setIsReanalyzing] = useState(false);
-  const [visibleColumns, setVisibleColumns] = useState<Record<ViewColumn, boolean>>({
+  const [isRebuildingInbox, setIsRebuildingInbox] = useState(false);
+  const [mode, setMode] = useState<PageMode>("unknowns");
+  const [excludeCommonThreshold, setExcludeCommonThreshold] = useState(20000);
+  const [visibleColumns] = useState<Record<ViewColumn, boolean>>({
     word: true,
     originalSentence: true,
     normalized: true,
@@ -82,10 +96,15 @@ export default function WordsPage() {
   });
   const [frequencyRanks, setFrequencyRanks] = useState<Map<string, number> | null>(null);
   const words = useDictionaryStore((state) => state.words);
+  const candidateWords = useDictionaryStore((state) => state.candidateWords);
+  const decisions = useDictionaryStore((state) => state.decisions);
   const initialized = useDictionaryStore((state) => state.initialized);
   const initialize = useDictionaryStore((state) => state.initialize);
   const removeWord = useDictionaryStore((state) => state.removeWord);
   const reanalyzeStems = useDictionaryStore((state) => state.reanalyzeStems);
+  const addUnknownWordFromToken = useDictionaryStore((state) => state.addUnknownWordFromToken);
+  const setWordDecision = useDictionaryStore((state) => state.setWordDecision);
+  const refreshCandidateWords = useDictionaryStore((state) => state.refreshCandidateWords);
 
   useEffect(() => {
     if (!initialized) {
@@ -128,15 +147,13 @@ export default function WordsPage() {
     return map;
   }, [frequencyRanks, words]);
 
-  const sorted = useMemo(() => {
+  const unknownsSorted = useMemo(() => {
     const order = [...words];
     const direction = sortDirection === "asc" ? 1 : -1;
 
     order.sort((a, b) => {
       if (sortField === "alphabetical") {
-        return (
-          a.normalized.localeCompare(b.normalized, undefined, { sensitivity: "base" }) * direction
-        );
+        return a.normalized.localeCompare(b.normalized, undefined, { sensitivity: "base" }) * direction;
       }
 
       if (sortField === "frequencyRank") {
@@ -158,74 +175,29 @@ export default function WordsPage() {
     return order;
   }, [ranksById, sortDirection, sortField, words]);
 
-  const handleCopyWords = useCallback(async () => {
-    const text = sorted.map((word) => word.original).join("\n");
-    if (text.trim() === "") {
-      setImportError(null);
-      setImportSuccess("No words available to copy.");
-      return;
-    }
+  const unknownNormalized = useMemo(() => new Set(words.map((word) => word.normalized)), [words]);
 
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text);
-      } else {
-        const textarea = document.createElement("textarea");
-        textarea.value = text;
-        textarea.setAttribute("readonly", "true");
-        textarea.style.position = "absolute";
-        textarea.style.left = "-9999px";
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand("copy");
-        document.body.removeChild(textarea);
-      }
-      setImportError(null);
-      setImportSuccess(
-        `Copied ${sorted.length} word${sorted.length === 1 ? "" : "s"} to the clipboard.`,
-      );
-    } catch (error) {
-      setImportSuccess(null);
-      setImportError(error instanceof Error ? error.message : "Failed to copy words.");
-    }
-  }, [sorted]);
-
-  const handleCopyWordsAndSentences = useCallback(async () => {
-    const text = sorted
-      .map((word) => {
-        const sentence = (word.originalSentence ?? "").trim();
-        return `${word.original}, as in "${sentence}"`;
+  const inboxRows = useMemo(() => {
+    return candidateWords
+      .filter((candidate) => !/[֐-׿]/u.test(candidate.normalized))
+      .filter((candidate) => {
+        const rank = candidateRank(candidate, frequencyRanks);
+        if (!rank) return true;
+        return rank > excludeCommonThreshold;
       })
-      .join("\n");
-    if (text.trim() === "") {
-      setImportError(null);
-      setImportSuccess("No words available to copy.");
-      return;
-    }
-
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text);
-      } else {
-        const textarea = document.createElement("textarea");
-        textarea.value = text;
-        textarea.setAttribute("readonly", "true");
-        textarea.style.position = "absolute";
-        textarea.style.left = "-9999px";
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand("copy");
-        document.body.removeChild(textarea);
-      }
-      setImportError(null);
-      setImportSuccess(
-        `Copied ${sorted.length} word${sorted.length === 1 ? "" : "s"} with sentences.`,
-      );
-    } catch (error) {
-      setImportSuccess(null);
-      setImportError(error instanceof Error ? error.message : "Failed to copy words.");
-    }
-  }, [sorted]);
+      .filter((candidate) => !unknownNormalized.has(candidate.normalized))
+      .filter((candidate) => !decisions[candidate.normalized])
+      .map((candidate) => ({ candidate, rank: candidateRank(candidate, frequencyRanks), decision: decisions[candidate.normalized] ?? null }))
+      .sort((a, b) => {
+        const aRank = typeof a.rank === "number" ? a.rank : Number.NEGATIVE_INFINITY;
+        const bRank = typeof b.rank === "number" ? b.rank : Number.NEGATIVE_INFINITY;
+        if (aRank !== bRank) return bRank - aRank;
+        if (a.candidate.subtitleCount !== b.candidate.subtitleCount) {
+          return b.candidate.subtitleCount - a.candidate.subtitleCount;
+        }
+        return a.candidate.normalized.localeCompare(b.candidate.normalized);
+      });
+  }, [candidateWords, decisions, excludeCommonThreshold, frequencyRanks, unknownNormalized]);
 
   const handleSortFieldChange = useCallback((next: SortField) => {
     setSortField(next);
@@ -235,19 +207,6 @@ export default function WordsPage() {
       setSortDirection("asc");
     }
   }, []);
-
-  const handleSortHeaderClick = useCallback(
-    (field: SortField) => {
-      setSortDirection((prev) => {
-        if (sortField === field) {
-          return prev === "asc" ? "desc" : "asc";
-        }
-        return field === "updatedAt" ? "desc" : "asc";
-      });
-      setSortField(field);
-    },
-    [sortField],
-  );
 
   const handleReanalyzeStems = useCallback(async () => {
     setIsReanalyzing(true);
@@ -263,62 +222,45 @@ export default function WordsPage() {
     }
   }, [reanalyzeStems]);
 
+  const handleRebuildInbox = useCallback(async () => {
+    setIsRebuildingInbox(true);
+    setImportError(null);
+    setImportSuccess(null);
+    try {
+      const files = await listSubtitleFiles();
+      const records: Array<{ fileHash: string; cues: Cue[] }> = [];
+      for (const file of files) {
+        const cues = await getCuesForFile(file.bytesHash);
+        if (cues && cues.length > 0) {
+          records.push({ fileHash: file.bytesHash, cues });
+        }
+      }
+      await rebuildAllCandidateWords(records);
+      await refreshCandidateWords();
+      setImportSuccess(`Rebuilt inbox from ${records.length} subtitle file${records.length === 1 ? "" : "s"}.`);
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : "Failed to rebuild inbox.");
+    } finally {
+      setIsRebuildingInbox(false);
+    }
+  }, [refreshCandidateWords]);
+
+  const triage = useCallback(
+    async (candidate: CandidateWordStat, decision: "unknown" | "known" | "ignored") => {
+      if (decision === "unknown") {
+        await addUnknownWordFromToken(candidate.normalized, candidate.example);
+      }
+      await setWordDecision(candidate.normalized, decision);
+      await refreshCandidateWords();
+    },
+    [addUnknownWordFromToken, refreshCandidateWords, setWordDecision],
+  );
+
   if (!initialized) {
     return (
       <div className="space-y-4">
         <h2 className="text-xl font-semibold">Unknown Words</h2>
-        <p className="text-sm text-white/60">Loading your saved vocabulary...</p>
-      </div>
-    );
-  }
-
-  if (sorted.length === 0) {
-    return (
-      <div className="space-y-4">
-        <h2 className="text-xl font-semibold">Unknown Words</h2>
-        <p className="text-sm text-white/60">
-          Click a word in the player to add it to your learning list.
-        </p>
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              void handleCopyWords();
-            }}
-            className="rounded bg-white/10 px-3 py-1 text-xs font-medium text-white hover:bg-white/20"
-          >
-            Copy Words
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              void handleCopyWordsAndSentences();
-            }}
-            className="rounded bg-white/10 px-3 py-1 text-xs font-medium text-white hover:bg-white/20"
-          >
-            Copy Words + Sentences
-          </button>
-          <a
-            href="https://chatgpt.com/share/69795a95-8b4c-8013-977d-dc008df46bce"
-            target="_blank"
-            rel="noreferrer"
-            className="rounded bg-emerald-500/20 px-3 py-1 text-xs font-medium text-emerald-200 hover:bg-emerald-500/30"
-          >
-            Play with ChatGPT
-          </a>
-          <button
-            type="button"
-            onClick={() => {
-              void handleReanalyzeStems();
-            }}
-            className="rounded bg-white/10 px-3 py-1 text-xs font-medium text-white hover:bg-white/20 disabled:opacity-50"
-            disabled={isReanalyzing}
-          >
-            {isReanalyzing ? "Re-analyzing…" : "Re-analyze"}
-          </button>
-        </div>
-        {importError && <p className="text-xs text-red-400">{importError}</p>}
-        {importSuccess && <p className="text-xs text-emerald-400">{importSuccess}</p>}
+        <p className="text-sm text-white/60">Loading your vocabulary...</p>
       </div>
     );
   }
@@ -328,189 +270,122 @@ export default function WordsPage() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="text-xl font-semibold">Unknown Words</h2>
-          <p className="text-xs text-white/50">Review your list or prune items you no longer need.</p>
+          <p className="text-xs text-white/50">Use Unknowns for your list, Inbox to mine subtitles you already imported.</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              void handleCopyWords();
-            }}
-            className="rounded bg-white/10 px-3 py-1 text-xs font-medium text-white hover:bg-white/20"
-          >
-            Copy Words
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              void handleCopyWordsAndSentences();
-            }}
-            className="rounded bg-white/10 px-3 py-1 text-xs font-medium text-white hover:bg-white/20"
-          >
-            Copy Words + Sentences
-          </button>
-          <a
-            href="https://chatgpt.com/share/69112ad9-3858-8013-a13d-061dd7661a56"
-            target="_blank"
-            rel="noreferrer"
-            className="rounded bg-emerald-500/20 px-3 py-1 text-xs font-medium text-emerald-200 hover:bg-emerald-500/30"
-          >
-            Play with ChatGPT
-          </a>
-          <button
-            type="button"
-            onClick={() => {
-              void handleReanalyzeStems();
-            }}
-            className="rounded bg-white/10 px-3 py-1 text-xs font-medium text-white hover:bg-white/20 disabled:opacity-50"
-            disabled={isReanalyzing}
-          >
-            {isReanalyzing ? "Re-analyzing..." : "Re-analyze"}
-          </button>
+        <div className="flex items-center gap-2 rounded border border-white/10 bg-black/20 p-1 text-xs">
+          <button type="button" className={`rounded px-3 py-1 ${mode === "unknowns" ? "bg-white/20 text-white" : "text-white/70"}`} onClick={() => setMode("unknowns")}>Unknowns</button>
+          <button type="button" className={`rounded px-3 py-1 ${mode === "inbox" ? "bg-white/20 text-white" : "text-white/70"}`} onClick={() => setMode("inbox")}>Inbox candidates</button>
         </div>
       </div>
-      <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-white/60">
-        <div className="flex flex-wrap items-center gap-2">
-          <span>{sorted.length} items</span>
-          <label className="flex items-center gap-1">
-            <span>Sort</span>
-            <select
-              value={sortField}
-              onChange={(event) => {
-                handleSortFieldChange(event.target.value as SortField);
-              }}
-              className="rounded border border-white/10 bg-slate-900/80 px-2 py-1 text-white hover:bg-slate-800 focus:outline-none focus-visible:outline-none"
-            >
-              <option value="updatedAt" className="bg-slate-900 text-white">
-                Updated
-              </option>
-              <option value="alphabetical" className="bg-slate-900 text-white">
-                A-Z
-              </option>
-              <option value="frequencyRank" className="bg-slate-900 text-white">
-                Frequency Rank
-              </option>
-            </select>
-          </label>
-          <button
-            type="button"
-            className="rounded border border-white/10 bg-white/5 px-2 py-1 text-white"
-            onClick={() => setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"))}
-          >
-            {sortDirection === "asc" ? "Ascending" : "Descending"}
-          </button>
-          <details className="relative">
-            <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded border border-white/10 bg-slate-900/80 px-2 py-1 text-white hover:bg-slate-800 focus:outline-none focus-visible:outline-none">
-              View
-              <span className="text-[10px] text-white/70">▾</span>
-            </summary>
-            <div className="absolute left-0 z-10 mt-2 w-56 rounded border border-white/10 bg-slate-900/95 p-3 text-xs text-white shadow-lg">
-              {(
-                [
-                  ["word", "Word"],
-                  ["originalSentence", "Original sentence"],
-                  ["normalized", "Normalized"],
-                  ["stem", "Stem"],
-                  ["frequencyRank", "Frequency Rank"],
-                  ["updatedAt", "Updated"],
-                  ["actions", "Actions"],
-                ] as const
-              ).map(([key, label]) => (
-                <label key={key} className="flex items-center gap-2 py-1">
-                  <input
-                    type="checkbox"
-                    className="h-3 w-3 rounded border-white/30 bg-slate-900"
-                    checked={visibleColumns[key]}
-                    onChange={() =>
-                      setVisibleColumns((prev) => ({ ...prev, [key]: !prev[key] }))
-                    }
-                  />
-                  <span>{label}</span>
-                </label>
-              ))}
+
+      {mode === "unknowns" ? (
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-white/60">
+            <div className="flex flex-wrap items-center gap-2">
+              <span>{unknownsSorted.length} items</span>
+              <label className="flex items-center gap-1">
+                <span>Sort</span>
+                <select
+                  value={sortField}
+                  onChange={(event) => {
+                    handleSortFieldChange(event.target.value as SortField);
+                  }}
+                  className="rounded border border-white/10 bg-slate-900/80 px-2 py-1 text-white"
+                >
+                  <option value="updatedAt">Updated</option>
+                  <option value="alphabetical">A-Z</option>
+                  <option value="frequencyRank">Frequency Rank</option>
+                </select>
+              </label>
+              <button type="button" className="rounded border border-white/10 bg-white/5 px-2 py-1 text-white" onClick={() => setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"))}>
+                {sortDirection === "asc" ? "Ascending" : "Descending"}
+              </button>
+              <button type="button" onClick={() => void handleReanalyzeStems()} className="rounded bg-white/10 px-2 py-1 text-white" disabled={isReanalyzing}>
+                {isReanalyzing ? "Re-analyzing…" : "Re-analyze"}
+              </button>
             </div>
-          </details>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          {isLoadingRanks && <span>Loading frequency ranks...</span>}
-          {rankError && <span className="text-amber-300">{rankError}</span>}
-          {importError ? (
-            <span className="text-red-400">{importError}</span>
-          ) : importSuccess ? (
-            <span className="text-emerald-400">{importSuccess}</span>
-          ) : null}
-        </div>
-      </div>
-      <div className="overflow-hidden rounded-lg border border-white/10">
-        <table className="min-w-full divide-y divide-white/10">
-          <thead className="bg-white/5 text-left text-xs uppercase tracking-wide text-white/60">
-            <tr>
-              {visibleColumns.word && (
-                <th className="px-4 py-2">
-                  <button
-                    type="button"
-                    onClick={() => handleSortHeaderClick("alphabetical")}
-                    className="inline-flex items-center gap-1 hover:text-white"
-                  >
-                    Word
-                    {sortField === "alphabetical" && (
-                      <span className="text-[10px] text-white/70">
-                        {sortDirection === "asc" ? "▲" : "▼"}
-                      </span>
-                    )}
-                  </button>
-                </th>
-              )}
-              {visibleColumns.originalSentence && <th className="px-4 py-2">Original sentence</th>}
-              {visibleColumns.normalized && <th className="px-4 py-2">Normalized</th>}
-              {visibleColumns.stem && <th className="px-4 py-2">Stem</th>}
-              {visibleColumns.frequencyRank && (
-                <th className="px-4 py-2 text-right">
-                  <button
-                    type="button"
-                    onClick={() => handleSortHeaderClick("frequencyRank")}
-                    className="flex w-full items-center justify-end gap-1 hover:text-white"
-                  >
-                    Frequency Rank
-                    {sortField === "frequencyRank" && (
-                      <span className="text-[10px] text-white/70">
-                        {sortDirection === "asc" ? "▲" : "▼"}
-                      </span>
-                    )}
-                  </button>
-                </th>
-              )}
-              {visibleColumns.updatedAt && (
-                <th className="px-4 py-2 text-right">
-                  <button
-                    type="button"
-                    onClick={() => handleSortHeaderClick("updatedAt")}
-                    className="flex w-full items-center justify-end gap-1 hover:text-white"
-                  >
-                    Updated
-                    {sortField === "updatedAt" && (
-                      <span className="text-[10px] text-white/70">
-                        {sortDirection === "asc" ? "▲" : "▼"}
-                      </span>
-                    )}
-                  </button>
-                </th>
-              )}
-              {visibleColumns.actions && <th className="px-4 py-2 text-right">Actions</th>}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-white/10 text-sm">
-            {sorted.map((word) => (
-              <WordRow
-                key={word.id}
-                word={word}
-                frequencyRank={ranksById.get(word.id) ?? null}
-                onDelete={removeWord}
-                visibleColumns={visibleColumns}
-              />
-            ))}
-          </tbody>
-        </table>
+          </div>
+
+          {unknownsSorted.length === 0 ? (
+            <p className="text-sm text-white/60">No unknown words yet. Use Inbox candidates to add words from subtitle history.</p>
+          ) : (
+            <div className="overflow-hidden rounded-lg border border-white/10">
+              <table className="min-w-full divide-y divide-white/10">
+                <thead className="bg-white/5 text-left text-xs uppercase tracking-wide text-white/60">
+                  <tr>
+                    {visibleColumns.word && <th className="px-4 py-2">Word</th>}
+                    {visibleColumns.originalSentence && <th className="px-4 py-2">Original sentence</th>}
+                    {visibleColumns.normalized && <th className="px-4 py-2">Normalized</th>}
+                    {visibleColumns.stem && <th className="px-4 py-2">Stem</th>}
+                    {visibleColumns.frequencyRank && <th className="px-4 py-2 text-right">Frequency Rank</th>}
+                    {visibleColumns.updatedAt && <th className="px-4 py-2 text-right">Updated</th>}
+                    {visibleColumns.actions && <th className="px-4 py-2 text-right">Actions</th>}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/10 text-sm">
+                  {unknownsSorted.map((word) => (
+                    <WordRow key={word.id} word={word} frequencyRank={ranksById.get(word.id) ?? null} onDelete={removeWord} visibleColumns={visibleColumns} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-white/70">
+            <button type="button" onClick={() => void handleRebuildInbox()} className="rounded bg-white/10 px-3 py-1 text-white hover:bg-white/20" disabled={isRebuildingInbox}>
+              {isRebuildingInbox ? "Rebuilding…" : "Rebuild Inbox"}
+            </button>
+            <label className="flex items-center gap-1">
+              Exclude top rank ≤
+              <input type="number" className="w-20 rounded border border-white/10 bg-slate-900/80 px-2 py-1" value={excludeCommonThreshold} min={0} onChange={(e) => setExcludeCommonThreshold(Number(e.target.value) || 0)} />
+            </label>
+            <span>{inboxRows.length} candidates</span>
+          </div>
+          <div className="overflow-hidden rounded-lg border border-white/10">
+            <table className="min-w-full divide-y divide-white/10">
+              <thead className="bg-white/5 text-left text-xs uppercase tracking-wide text-white/60">
+                <tr>
+                  <th className="px-4 py-2">Word</th>
+                  <th className="px-4 py-2">Stem</th>
+                  <th className="px-4 py-2 text-right">Frequency rank</th>
+                  <th className="px-4 py-2 text-right">Subtitle freq</th>
+                  <th className="px-4 py-2 text-right">Source count</th>
+                  <th className="px-4 py-2">Example</th>
+                  <th className="px-4 py-2 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/10 text-sm">
+                {inboxRows.map(({ candidate, rank, decision }) => (
+                  <tr key={candidate.normalized} className="hover:bg-white/5">
+                    <td className="px-4 py-2 font-medium">{candidate.normalized}</td>
+                    <td className="px-4 py-2 text-white/70">{candidate.stem || stemWord(candidate.normalized)}</td>
+                    <td className="px-4 py-2 text-right text-white/70">{typeof rank === "number" ? `#${rank.toLocaleString()}` : "-"}</td>
+                    <td className="px-4 py-2 text-right text-white/70">{candidate.subtitleCount.toLocaleString()}</td>
+                    <td className="px-4 py-2 text-right text-white/70">{candidate.sourceCount.toLocaleString()}</td>
+                    <td className="px-4 py-2 text-white/60"><span className="line-clamp-2">{candidate.example || "—"}</span></td>
+                    <td className="px-4 py-2">
+                      <div className="flex justify-end gap-2">
+                        <button type="button" className="rounded border border-emerald-400/40 px-2 py-1 text-xs text-emerald-200" onClick={() => void triage(candidate, "unknown")}>Add</button>
+                        <button type="button" className="rounded border border-sky-400/40 px-2 py-1 text-xs text-sky-200" onClick={() => void triage(candidate, "known")}>Known</button>
+                        <button type="button" className="rounded border border-white/20 px-2 py-1 text-xs text-white/80" onClick={() => void triage(candidate, "ignored")}>Ignore</button>
+                      </div>
+                      {decision && <div className="mt-1 text-right text-[10px] text-white/40">Resolved: {decision}</div>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      <div className="flex flex-wrap items-center gap-3 text-xs text-white/60">
+        {isLoadingRanks && <span>Loading frequency ranks...</span>}
+        {rankError && <span className="text-amber-300">{rankError}</span>}
+        {importError ? <span className="text-red-400">{importError}</span> : null}
+        {importSuccess ? <span className="text-emerald-400">{importSuccess}</span> : null}
       </div>
     </div>
   );
