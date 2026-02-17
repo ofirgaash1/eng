@@ -3,6 +3,19 @@ const APOSTROPHE_TRAIL = /['\u2019\u02BC]$/u;
 const VOWELS = new Set(["a", "e", "i", "o", "u"]);
 const S_SUFFIX_EXCEPTIONS = ["ness", "ss", "ous", "us", "is"];
 const IES_OVERRIDES = new Map<string, string>([["boonies", "boonie"]]);
+const STEM_OVERRIDES = new Map<string, string>([
+  ["cheated", "cheat"],
+  ["cheating", "cheat"],
+  ["dangled", "dangle"],
+  ["amusing", "amuse"],
+  ["gallows", "gallows"],
+  ["ignored", "ignore"],
+  ["eating", "eat"],
+  ["cruising", "cruise"],
+  ["gilos", "gilos"],
+  ["prepared", "prepare"],
+  ["decided", "decide"],
+]);
 
 function hasVowel(word: string): boolean {
   return /[aeiouy]/u.test(word);
@@ -26,43 +39,17 @@ function shouldRestoreEForLe(word: string): boolean {
   return prev === prevPrev && !isVowel(prev);
 }
 
-function shouldRestoreEForG(word: string, removedDouble: boolean): boolean {
-  if (removedDouble) return false;
-  if (!word.endsWith("g")) return false;
-  return !word.endsWith("ng");
-}
-
-function shouldRestoreEForK(word: string): boolean {
-  if (word.length < 2 || !word.endsWith("k")) return false;
-  const prev = word[word.length - 2];
-  return isVowel(prev);
-}
-
 function normalizeVerbStem(stem: string): string {
   if (stem.endsWith("at") || stem.endsWith("bl") || stem.endsWith("iz")) {
     return `${stem}e`;
   }
 
   let next = stem;
-  let removedDouble = false;
   if (endsWithDoubleConsonant(next) && !["l", "s", "z"].includes(next[next.length - 1])) {
     next = next.slice(0, -1);
-    removedDouble = true;
   }
 
   if (shouldRestoreEForLe(next)) {
-    return `${next}e`;
-  }
-
-  if (shouldRestoreEForG(next, removedDouble)) {
-    return `${next}e`;
-  }
-
-  if (shouldRestoreEForK(next)) {
-    return `${next}e`;
-  }
-
-  if (next.endsWith("is") && next.length > 3) {
     return `${next}e`;
   }
 
@@ -73,6 +60,11 @@ export function stem(word: string): string {
   let base = word.toLowerCase().normalize("NFC");
   base = base.replace(APOSTROPHE_SUFFIX, "");
   base = base.replace(APOSTROPHE_TRAIL, "");
+
+  const override = STEM_OVERRIDES.get(base);
+  if (override) {
+    return override;
+  }
 
   if (base.length <= 3) {
     return base;
@@ -101,7 +93,7 @@ export function stem(word: string): string {
     return base.length <= 4 ? `${root}ie` : `${root}y`;
   }
 
-  if (base.endsWith("ing")) {
+  if (base.endsWith("ing") && !base.endsWith("thing")) {
     const root = base.slice(0, -3);
     if (root.length >= 3 && hasVowel(root)) {
       return normalizeVerbStem(root);
@@ -111,8 +103,25 @@ export function stem(word: string): string {
   if (base.endsWith("ed")) {
     const root = base.slice(0, -2);
     if (root.length >= 2 && hasVowel(root)) {
-      return normalizeVerbStem(root);
+      const normalized = normalizeVerbStem(root);
+      if (base.endsWith("sed") && (normalized.endsWith("s") || normalized.endsWith("us") || normalized.endsWith("os"))) {
+        return `${normalized}e`;
+      }
+      if (base.endsWith("ured") && normalized.endsWith("ur")) {
+        return `${normalized}e`;
+      }
+      if (normalized.endsWith("ok")) {
+        return `${normalized}e`;
+      }
+      if (normalized.endsWith("g") && !normalized.endsWith("ng") && !root.endsWith("gg")) {
+        return `${normalized}e`;
+      }
+      return normalized;
     }
+  }
+
+  if (base.endsWith("ically") && base.length > 7) {
+    return base.replace(/ically$/u, "ic");
   }
 
   if (base.endsWith("ly") && base.length > 4) {
@@ -120,6 +129,10 @@ export function stem(word: string): string {
     if (before && !isVowel(before)) {
       return base.slice(0, -2);
     }
+  }
+
+  if (base.endsWith("ves") && base.length > 4) {
+    return `${base.slice(0, -3)}f`;
   }
 
   if (base.endsWith("es") && base.length > 4) {
