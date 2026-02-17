@@ -20,6 +20,10 @@ type ViewColumn =
 
 type PageMode = "unknowns" | "inbox";
 
+type InboxSortField = "word" | "stem" | "frequencyRank" | "subtitleCount" | "sourceCount";
+type InboxViewColumn = "word" | "stem" | "frequencyRank" | "subtitleCount" | "sourceCount" | "example" | "actions";
+
+
 interface WordRowProps {
   word: UnknownWord;
   frequencyRank: number | null;
@@ -96,6 +100,19 @@ export default function WordsPage() {
   });
   const [isViewMenuOpen, setIsViewMenuOpen] = useState(false);
   const viewMenuRef = useRef<HTMLDivElement | null>(null);
+  const [inboxSortField, setInboxSortField] = useState<InboxSortField>("frequencyRank");
+  const [inboxSortDirection, setInboxSortDirection] = useState<SortDirection>("desc");
+  const [inboxVisibleColumns, setInboxVisibleColumns] = useState<Record<InboxViewColumn, boolean>>({
+    word: true,
+    stem: true,
+    frequencyRank: true,
+    subtitleCount: true,
+    sourceCount: true,
+    example: true,
+    actions: true,
+  });
+  const [isInboxViewMenuOpen, setIsInboxViewMenuOpen] = useState(false);
+  const inboxViewMenuRef = useRef<HTMLDivElement | null>(null);
   const [frequencyRanks, setFrequencyRanks] = useState<Map<string, number> | null>(null);
   const words = useDictionaryStore((state) => state.words);
   const candidateWords = useDictionaryStore((state) => state.candidateWords);
@@ -143,20 +160,22 @@ export default function WordsPage() {
 
 
   useEffect(() => {
-    if (!isViewMenuOpen) return;
+    if (!isViewMenuOpen && !isInboxViewMenuOpen) return;
 
     const handlePointerDown = (event: MouseEvent) => {
-      if (viewMenuRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (viewMenuRef.current?.contains(target) || inboxViewMenuRef.current?.contains(target)) {
         return;
       }
       setIsViewMenuOpen(false);
+      setIsInboxViewMenuOpen(false);
     };
 
     document.addEventListener("mousedown", handlePointerDown);
     return () => {
       document.removeEventListener("mousedown", handlePointerDown);
     };
-  }, [isViewMenuOpen]);
+  }, [isInboxViewMenuOpen, isViewMenuOpen]);
 
   const ranksById = useMemo(() => {
     const map = new Map<string, number | null>();
@@ -197,6 +216,7 @@ export default function WordsPage() {
   const unknownNormalized = useMemo(() => new Set(words.map((word) => word.normalized)), [words]);
 
   const inboxRows = useMemo(() => {
+    const direction = inboxSortDirection === "asc" ? 1 : -1;
     return candidateWords
       .filter((candidate) => !/[֐-׿]/u.test(candidate.normalized))
       .filter((candidate) => {
@@ -208,15 +228,30 @@ export default function WordsPage() {
       .filter((candidate) => !decisions[candidate.normalized])
       .map((candidate) => ({ candidate, rank: candidateRank(candidate, frequencyRanks), decision: decisions[candidate.normalized] ?? null }))
       .sort((a, b) => {
+        if (inboxSortField === "word") {
+          return a.candidate.normalized.localeCompare(b.candidate.normalized) * direction;
+        }
+        if (inboxSortField === "stem") {
+          return (a.candidate.stem || "").localeCompare(b.candidate.stem || "") * direction;
+        }
+        if (inboxSortField === "subtitleCount") {
+          return (a.candidate.subtitleCount - b.candidate.subtitleCount) * direction;
+        }
+        if (inboxSortField === "sourceCount") {
+          return (a.candidate.sourceCount - b.candidate.sourceCount) * direction;
+        }
+
         const aRank = typeof a.rank === "number" ? a.rank : Number.NEGATIVE_INFINITY;
         const bRank = typeof b.rank === "number" ? b.rank : Number.NEGATIVE_INFINITY;
-        if (aRank !== bRank) return bRank - aRank;
+        if (aRank !== bRank) {
+          return (aRank - bRank) * direction;
+        }
         if (a.candidate.subtitleCount !== b.candidate.subtitleCount) {
-          return b.candidate.subtitleCount - a.candidate.subtitleCount;
+          return (a.candidate.subtitleCount - b.candidate.subtitleCount) * direction;
         }
         return a.candidate.normalized.localeCompare(b.candidate.normalized);
       });
-  }, [candidateWords, decisions, excludeCommonThreshold, frequencyRanks, unknownNormalized]);
+  }, [candidateWords, decisions, excludeCommonThreshold, frequencyRanks, inboxSortDirection, inboxSortField, unknownNormalized]);
 
   const handleSortFieldChange = useCallback((next: SortField) => {
     setSortField(next);
@@ -239,6 +274,19 @@ export default function WordsPage() {
       setSortField(field);
     },
     [sortField],
+  );
+
+  const handleInboxSortHeaderClick = useCallback(
+    (field: InboxSortField) => {
+      setInboxSortDirection((prev) => {
+        if (inboxSortField === field) {
+          return prev === "asc" ? "desc" : "asc";
+        }
+        return field === "frequencyRank" ? "desc" : "asc";
+      });
+      setInboxSortField(field);
+    },
+    [inboxSortField],
   );
 
   const handleReanalyzeStems = useCallback(async () => {
@@ -451,37 +499,109 @@ export default function WordsPage() {
               <input type="number" className="w-20 rounded border border-white/10 bg-slate-900/80 px-2 py-1" value={excludeCommonThreshold} min={0} onChange={(e) => setExcludeCommonThreshold(Number(e.target.value) || 0)} />
             </label>
             <span>{inboxRows.length} candidates</span>
+            <div className="relative" ref={inboxViewMenuRef}>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 rounded border border-white/10 bg-slate-900/80 px-2 py-1 text-white hover:bg-slate-800"
+                onClick={() => setIsInboxViewMenuOpen((prev) => !prev)}
+              >
+                View
+                <span className="text-[10px] text-white/70">▾</span>
+              </button>
+              {isInboxViewMenuOpen && (
+                <div className="absolute left-0 z-10 mt-2 w-56 rounded border border-white/10 bg-slate-900/95 p-3 text-xs text-white shadow-lg">
+                  {(
+                    [
+                      ["word", "Word"],
+                      ["stem", "Stem"],
+                      ["frequencyRank", "Frequency rank"],
+                      ["subtitleCount", "Subtitle freq"],
+                      ["sourceCount", "Source count"],
+                      ["example", "Example"],
+                      ["actions", "Actions"],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <label key={key} className="flex items-center gap-2 py-1">
+                      <input
+                        type="checkbox"
+                        className="h-3 w-3 rounded border-white/30 bg-slate-900"
+                        checked={inboxVisibleColumns[key]}
+                        onChange={() =>
+                          setInboxVisibleColumns((prev) => ({ ...prev, [key]: !prev[key] }))
+                        }
+                      />
+                      <span>{label}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
           <div className="overflow-hidden rounded-lg border border-white/10">
             <table className="min-w-full divide-y divide-white/10">
               <thead className="bg-white/5 text-left text-xs uppercase tracking-wide text-white/60">
                 <tr>
-                  <th className="px-4 py-2">Word</th>
-                  <th className="px-4 py-2">Stem</th>
-                  <th className="px-4 py-2 text-right">Frequency rank</th>
-                  <th className="px-4 py-2 text-right">Subtitle freq</th>
-                  <th className="px-4 py-2 text-right">Source count</th>
-                  <th className="px-4 py-2">Example</th>
-                  <th className="px-4 py-2 text-right">Actions</th>
+                  {inboxVisibleColumns.word && (
+                    <th className="px-4 py-2">
+                      <button type="button" onClick={() => handleInboxSortHeaderClick("word")} className="inline-flex items-center gap-1 hover:text-white">
+                        Word
+                        {inboxSortField === "word" && <span className="text-[10px] text-white/70">{inboxSortDirection === "asc" ? "▲" : "▼"}</span>}
+                      </button>
+                    </th>
+                  )}
+                  {inboxVisibleColumns.stem && (
+                    <th className="px-4 py-2">
+                      <button type="button" onClick={() => handleInboxSortHeaderClick("stem")} className="inline-flex items-center gap-1 hover:text-white">
+                        Stem
+                        {inboxSortField === "stem" && <span className="text-[10px] text-white/70">{inboxSortDirection === "asc" ? "▲" : "▼"}</span>}
+                      </button>
+                    </th>
+                  )}
+                  {inboxVisibleColumns.frequencyRank && (
+                    <th className="px-4 py-2 text-right">
+                      <button type="button" onClick={() => handleInboxSortHeaderClick("frequencyRank")} className="flex w-full items-center justify-end gap-1 hover:text-white">
+                        Frequency rank
+                        {inboxSortField === "frequencyRank" && <span className="text-[10px] text-white/70">{inboxSortDirection === "asc" ? "▲" : "▼"}</span>}
+                      </button>
+                    </th>
+                  )}
+                  {inboxVisibleColumns.subtitleCount && (
+                    <th className="px-4 py-2 text-right">
+                      <button type="button" onClick={() => handleInboxSortHeaderClick("subtitleCount")} className="flex w-full items-center justify-end gap-1 hover:text-white">
+                        Subtitle freq
+                        {inboxSortField === "subtitleCount" && <span className="text-[10px] text-white/70">{inboxSortDirection === "asc" ? "▲" : "▼"}</span>}
+                      </button>
+                    </th>
+                  )}
+                  {inboxVisibleColumns.sourceCount && (
+                    <th className="px-4 py-2 text-right">
+                      <button type="button" onClick={() => handleInboxSortHeaderClick("sourceCount")} className="flex w-full items-center justify-end gap-1 hover:text-white">
+                        Source count
+                        {inboxSortField === "sourceCount" && <span className="text-[10px] text-white/70">{inboxSortDirection === "asc" ? "▲" : "▼"}</span>}
+                      </button>
+                    </th>
+                  )}
+                  {inboxVisibleColumns.example && <th className="px-4 py-2">Example</th>}
+                  {inboxVisibleColumns.actions && <th className="px-4 py-2 text-right">Actions</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/10 text-sm">
                 {inboxRows.map(({ candidate, rank, decision }) => (
                   <tr key={candidate.normalized} className="hover:bg-white/5">
-                    <td className="px-4 py-2 font-medium">{candidate.normalized}</td>
-                    <td className="px-4 py-2 text-white/70">{candidate.stem || stemWord(candidate.normalized)}</td>
-                    <td className="px-4 py-2 text-right text-white/70">{typeof rank === "number" ? `#${rank.toLocaleString()}` : "-"}</td>
-                    <td className="px-4 py-2 text-right text-white/70">{candidate.subtitleCount.toLocaleString()}</td>
-                    <td className="px-4 py-2 text-right text-white/70">{candidate.sourceCount.toLocaleString()}</td>
-                    <td className="px-4 py-2 text-white/60"><span className="line-clamp-2">{candidate.example || "—"}</span></td>
-                    <td className="px-4 py-2">
+                    {inboxVisibleColumns.word && <td className="px-4 py-2 font-medium">{candidate.normalized}</td>}
+                    {inboxVisibleColumns.stem && <td className="px-4 py-2 text-white/70">{candidate.stem || stemWord(candidate.normalized)}</td>}
+                    {inboxVisibleColumns.frequencyRank && <td className="px-4 py-2 text-right text-white/70">{typeof rank === "number" ? `#${rank.toLocaleString()}` : "-"}</td>}
+                    {inboxVisibleColumns.subtitleCount && <td className="px-4 py-2 text-right text-white/70">{candidate.subtitleCount.toLocaleString()}</td>}
+                    {inboxVisibleColumns.sourceCount && <td className="px-4 py-2 text-right text-white/70">{candidate.sourceCount.toLocaleString()}</td>}
+                    {inboxVisibleColumns.example && <td className="px-4 py-2 text-white/60"><span className="line-clamp-2">{candidate.example || "—"}</span></td>}
+                    {inboxVisibleColumns.actions && <td className="px-4 py-2">
                       <div className="flex justify-end gap-2">
                         <button type="button" className="rounded border border-emerald-400/40 px-2 py-1 text-xs text-emerald-200" onClick={() => void triage(candidate, "unknown")}>Add</button>
                         <button type="button" className="rounded border border-sky-400/40 px-2 py-1 text-xs text-sky-200" onClick={() => void triage(candidate, "known")}>Known</button>
                         <button type="button" className="rounded border border-white/20 px-2 py-1 text-xs text-white/80" onClick={() => void triage(candidate, "ignored")}>Ignore</button>
                       </div>
                       {decision && <div className="mt-1 text-right text-[10px] text-white/40">Resolved: {decision}</div>}
-                    </td>
+                    </td>}
                   </tr>
                 ))}
               </tbody>
