@@ -3,4 +3,5 @@ npm run build
 git add .
 git commit -m "ok"
 git push
-git subtree push --prefix dist origin gh-pages
+$split = (git subtree split --prefix dist main 2>$null).Trim()
+git push origin "$split`:gh-pages" --force
