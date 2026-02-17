@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CandidateWordStat, Cue, UnknownWord } from "../../core/types";
 import { useDictionaryStore } from "../../state/dictionaryStore";
 import { getFrequencyRankForWord, loadFrequencyRanks } from "../../utils/frequencyRanks";
@@ -85,15 +85,17 @@ export default function WordsPage() {
   const [isRebuildingInbox, setIsRebuildingInbox] = useState(false);
   const [mode, setMode] = useState<PageMode>("unknowns");
   const [excludeCommonThreshold, setExcludeCommonThreshold] = useState(20000);
-  const [visibleColumns] = useState<Record<ViewColumn, boolean>>({
+  const [visibleColumns, setVisibleColumns] = useState<Record<ViewColumn, boolean>>({
     word: true,
     originalSentence: true,
-    normalized: true,
+    normalized: false,
     stem: true,
     frequencyRank: true,
-    updatedAt: true,
+    updatedAt: false,
     actions: true,
   });
+  const [isViewMenuOpen, setIsViewMenuOpen] = useState(false);
+  const viewMenuRef = useRef<HTMLDivElement | null>(null);
   const [frequencyRanks, setFrequencyRanks] = useState<Map<string, number> | null>(null);
   const words = useDictionaryStore((state) => state.words);
   const candidateWords = useDictionaryStore((state) => state.candidateWords);
@@ -138,6 +140,23 @@ export default function WordsPage() {
       cancelled = true;
     };
   }, []);
+
+
+  useEffect(() => {
+    if (!isViewMenuOpen) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (viewMenuRef.current?.contains(event.target as Node)) {
+        return;
+      }
+      setIsViewMenuOpen(false);
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+    };
+  }, [isViewMenuOpen]);
 
   const ranksById = useMemo(() => {
     const map = new Map<string, number | null>();
@@ -207,6 +226,20 @@ export default function WordsPage() {
       setSortDirection("asc");
     }
   }, []);
+
+
+  const handleSortHeaderClick = useCallback(
+    (field: SortField) => {
+      setSortDirection((prev) => {
+        if (sortField === field) {
+          return prev === "asc" ? "desc" : "asc";
+        }
+        return field === "updatedAt" ? "desc" : "asc";
+      });
+      setSortField(field);
+    },
+    [sortField],
+  );
 
   const handleReanalyzeStems = useCallback(async () => {
     setIsReanalyzing(true);
@@ -300,6 +333,43 @@ export default function WordsPage() {
               <button type="button" className="rounded border border-white/10 bg-white/5 px-2 py-1 text-white" onClick={() => setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"))}>
                 {sortDirection === "asc" ? "Ascending" : "Descending"}
               </button>
+              <div className="relative" ref={viewMenuRef}>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 rounded border border-white/10 bg-slate-900/80 px-2 py-1 text-white hover:bg-slate-800"
+                  onClick={() => setIsViewMenuOpen((prev) => !prev)}
+                >
+                  View
+                  <span className="text-[10px] text-white/70">▾</span>
+                </button>
+                {isViewMenuOpen && (
+                  <div className="absolute left-0 z-10 mt-2 w-56 rounded border border-white/10 bg-slate-900/95 p-3 text-xs text-white shadow-lg">
+                    {(
+                      [
+                        ["word", "Word"],
+                        ["originalSentence", "Original sentence"],
+                        ["normalized", "Normalized"],
+                        ["stem", "Stem"],
+                        ["frequencyRank", "Frequency Rank"],
+                        ["updatedAt", "Updated"],
+                        ["actions", "Actions"],
+                      ] as const
+                    ).map(([key, label]) => (
+                      <label key={key} className="flex items-center gap-2 py-1">
+                        <input
+                          type="checkbox"
+                          className="h-3 w-3 rounded border-white/30 bg-slate-900"
+                          checked={visibleColumns[key]}
+                          onChange={() =>
+                            setVisibleColumns((prev) => ({ ...prev, [key]: !prev[key] }))
+                          }
+                        />
+                        <span>{label}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
               <button type="button" onClick={() => void handleReanalyzeStems()} className="rounded bg-white/10 px-2 py-1 text-white" disabled={isReanalyzing}>
                 {isReanalyzing ? "Re-analyzing…" : "Re-analyze"}
               </button>
@@ -313,12 +383,51 @@ export default function WordsPage() {
               <table className="min-w-full divide-y divide-white/10">
                 <thead className="bg-white/5 text-left text-xs uppercase tracking-wide text-white/60">
                   <tr>
-                    {visibleColumns.word && <th className="px-4 py-2">Word</th>}
+                    {visibleColumns.word && (
+                      <th className="px-4 py-2">
+                        <button
+                          type="button"
+                          onClick={() => handleSortHeaderClick("alphabetical")}
+                          className="inline-flex items-center gap-1 hover:text-white"
+                        >
+                          Word
+                          {sortField === "alphabetical" && (
+                            <span className="text-[10px] text-white/70">{sortDirection === "asc" ? "▲" : "▼"}</span>
+                          )}
+                        </button>
+                      </th>
+                    )}
                     {visibleColumns.originalSentence && <th className="px-4 py-2">Original sentence</th>}
                     {visibleColumns.normalized && <th className="px-4 py-2">Normalized</th>}
                     {visibleColumns.stem && <th className="px-4 py-2">Stem</th>}
-                    {visibleColumns.frequencyRank && <th className="px-4 py-2 text-right">Frequency Rank</th>}
-                    {visibleColumns.updatedAt && <th className="px-4 py-2 text-right">Updated</th>}
+                    {visibleColumns.frequencyRank && (
+                      <th className="px-4 py-2 text-right">
+                        <button
+                          type="button"
+                          onClick={() => handleSortHeaderClick("frequencyRank")}
+                          className="flex w-full items-center justify-end gap-1 hover:text-white"
+                        >
+                          Frequency Rank
+                          {sortField === "frequencyRank" && (
+                            <span className="text-[10px] text-white/70">{sortDirection === "asc" ? "▲" : "▼"}</span>
+                          )}
+                        </button>
+                      </th>
+                    )}
+                    {visibleColumns.updatedAt && (
+                      <th className="px-4 py-2 text-right">
+                        <button
+                          type="button"
+                          onClick={() => handleSortHeaderClick("updatedAt")}
+                          className="flex w-full items-center justify-end gap-1 hover:text-white"
+                        >
+                          Updated
+                          {sortField === "updatedAt" && (
+                            <span className="text-[10px] text-white/70">{sortDirection === "asc" ? "▲" : "▼"}</span>
+                          )}
+                        </button>
+                      </th>
+                    )}
                     {visibleColumns.actions && <th className="px-4 py-2 text-right">Actions</th>}
                   </tr>
                 </thead>
