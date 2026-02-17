@@ -45,9 +45,14 @@ export function getFrequencyRankForWord(
   ranks: Map<string, number> | null,
 ): number | null {
   if (!ranks) return null;
-  const stemRank = ranks.get(word.stem.toLowerCase());
-  if (typeof stemRank === "number") return stemRank;
 
   const normalizedRank = ranks.get(word.normalized.toLowerCase());
-  return typeof normalizedRank === "number" ? normalizedRank : null;
+  const stemRank = ranks.get(word.stem.toLowerCase());
+
+  if (typeof normalizedRank === "number" && typeof stemRank === "number") {
+    return Math.min(normalizedRank, stemRank);
+  }
+  if (typeof normalizedRank === "number") return normalizedRank;
+  if (typeof stemRank === "number") return stemRank;
+  return null;
 }

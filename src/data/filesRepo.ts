@@ -2,6 +2,7 @@ import { nanoid } from "nanoid";
 import type { SubtitleFile } from "../core/types";
 import { db, withDb, withDbVoid } from "./db";
 import { deleteCuesForFile } from "./cuesRepo";
+import { deleteCandidateWordsForFile } from "./candidateWordsRepo";
 
 export async function upsertSubtitleFile(
   input: Omit<SubtitleFile, "id" | "addedAt"> & { addedAt?: number }
@@ -30,7 +31,7 @@ export async function listSubtitleFiles(): Promise<SubtitleFile[]> {
 
 export async function deleteSubtitleFile(id: string): Promise<void> {
   await withDbVoid(() =>
-    db.transaction("rw", db.subtitleFiles, db.subtitleCues, async () => {
+    db.transaction("rw", db.subtitleFiles, db.subtitleCues, db.candidateWordSources, async () => {
       const record = await db.subtitleFiles.get(id);
       if (!record) {
         return;
@@ -38,6 +39,7 @@ export async function deleteSubtitleFile(id: string): Promise<void> {
 
       await db.subtitleFiles.delete(id);
       await deleteCuesForFile(record.bytesHash);
+      await deleteCandidateWordsForFile(record.bytesHash);
     })
   );
 }
