@@ -25,6 +25,32 @@ type PageMode = "unknowns" | "inbox";
 type InboxSortField = "word" | "stem" | "frequencyRank" | "subtitleCount" | "sourceCount";
 type InboxViewColumn = "word" | "stem" | "frequencyRank" | "subtitleCount" | "sourceCount" | "example" | "actions";
 
+const CHATGPT_SHARE_URL = "https://chatgpt.com/share/69795a95-8b4c-8013-977d-dc008df46bce";
+
+function escapeCsv(value: string): string {
+  if (/[",\n]/.test(value)) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+}
+
+async function copyTextToClipboard(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "absolute";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  document.body.removeChild(textarea);
+}
+
 
 interface WordRowProps {
   word: UnknownWord;
@@ -276,6 +302,48 @@ export default function WordsPage() {
       });
   }, [candidateWords, decisions, excludeCommonThreshold, frequencyRanks, inboxSortDirection, inboxSortField, unknownNormalized]);
 
+  const handleCopyWords = useCallback(async () => {
+    const text = unknownsSorted.map((word) => word.original).join("\n");
+    if (text.trim() === "") {
+      setImportError(null);
+      setImportSuccess("No words available to copy.");
+      return;
+    }
+
+    try {
+      await copyTextToClipboard(text);
+      setImportError(null);
+      setImportSuccess(
+        `Copied ${unknownsSorted.length} word${unknownsSorted.length === 1 ? "" : "s"} to the clipboard.`,
+      );
+    } catch (error) {
+      setImportSuccess(null);
+      setImportError(error instanceof Error ? error.message : "Failed to copy words.");
+    }
+  }, [unknownsSorted]);
+
+  const handleCopyWordsAndSentences = useCallback(async () => {
+    const text = unknownsSorted
+      .map((word) => [escapeCsv(word.original), escapeCsv(word.originalSentence ?? "")].join(","))
+      .join("\n");
+    if (text.trim() === "") {
+      setImportError(null);
+      setImportSuccess("No words available to copy.");
+      return;
+    }
+
+    try {
+      await copyTextToClipboard(text);
+      setImportError(null);
+      setImportSuccess(
+        `Copied ${unknownsSorted.length} word${unknownsSorted.length === 1 ? "" : "s"} with sentences.`,
+      );
+    } catch (error) {
+      setImportSuccess(null);
+      setImportError(error instanceof Error ? error.message : "Failed to copy words.");
+    }
+  }, [unknownsSorted]);
+
   const handleSortFieldChange = useCallback((next: SortField) => {
     setSortField(next);
     if (next === "updatedAt") {
@@ -446,6 +514,34 @@ export default function WordsPage() {
               <button type="button" onClick={() => void handleReanalyzeStems()} className="rounded bg-white/10 px-2 py-1 text-white" disabled={isReanalyzing}>
                 {isReanalyzing ? "Re-analyzing…" : "Re-analyze"}
               </button>
+            </div>
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleCopyWords()}
+                  className="rounded bg-white/10 px-3 py-1 text-white hover:bg-white/20"
+                >
+                  Copy Words
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleCopyWordsAndSentences()}
+                  className="rounded bg-white/10 px-3 py-1 text-white hover:bg-white/20"
+                >
+                  Copy Words + Sentences
+                </button>
+                <a
+                  href={CHATGPT_SHARE_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded bg-emerald-500/20 px-3 py-1 text-emerald-200 hover:bg-emerald-500/30"
+                >
+                  Play with ChatGPT
+                </a>
+              </div>
+              {importError ? <p className="text-xs text-red-400">{importError}</p> : null}
+              {importSuccess ? <p className="text-xs text-emerald-400">{importSuccess}</p> : null}
             </div>
           </div>
 
@@ -647,8 +743,8 @@ export default function WordsPage() {
       <div className="flex flex-wrap items-center gap-3 text-xs text-white/60">
         {isLoadingRanks && <span>Loading frequency ranks...</span>}
         {rankError && <span className="text-amber-300">{rankError}</span>}
-        {importError ? <span className="text-red-400">{importError}</span> : null}
-        {importSuccess ? <span className="text-emerald-400">{importSuccess}</span> : null}
+        {mode === "inbox" && importError ? <span className="text-red-400">{importError}</span> : null}
+        {mode === "inbox" && importSuccess ? <span className="text-emerald-400">{importSuccess}</span> : null}
       </div>
     </div>
   );
