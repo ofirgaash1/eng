@@ -11,6 +11,7 @@ import { useDictionaryStore } from "../../state/dictionaryStore";
 import { usePrefsStore } from "../../state/prefsStore";
 import { listSubtitleFiles, upsertSubtitleFile, deleteSubtitleFile } from "../../data/filesRepo";
 import { getCuesForFile, saveCuesForFile } from "../../data/cuesRepo";
+import { rebuildInboxFromStoredSubtitleFiles } from "../../data/inboxRepo";
 import { hashBlob, readSubtitleText } from "../../utils/file";
 import { tokenize } from "../../core/nlp/tokenize";
 import { parseSrt } from "../../core/parsing/srtParser";
@@ -88,6 +89,7 @@ export default function QuotesPage() {
   const dictionaryInitialized = useDictionaryStore((state) => state.initialized);
   const initializeDictionary = useDictionaryStore((state) => state.initialize);
   const words = useDictionaryStore((state) => state.words);
+  const refreshCandidateWords = useDictionaryStore((state) => state.refreshCandidateWords);
   const prefsInitialized = usePrefsStore((state) => state.initialized);
   const initializePrefs = usePrefsStore((state) => state.initialize);
   const mediaLibrary = usePrefsStore((state) => state.prefs.mediaLibrary);
@@ -406,6 +408,7 @@ export default function QuotesPage() {
       }
       setProcessingFiles(true);
       setError(null);
+      let importedCount = 0;
       try {
         for (const file of Array.from(fileList)) {
           try {
@@ -420,11 +423,16 @@ export default function QuotesPage() {
             }
             await saveCuesForFile(hash, cues);
             await upsertSubtitleFile({ name: file.name, bytesHash: hash, totalCues: cues.length });
+            importedCount += 1;
           } catch (fileError) {
             const message =
               fileError instanceof Error ? fileError.message : "Failed to add subtitle file.";
             setError(`Failed to process ${file.name}: ${message}`);
           }
+        }
+        if (importedCount > 0) {
+          await rebuildInboxFromStoredSubtitleFiles();
+          await refreshCandidateWords();
         }
         await refreshLibrary();
       } finally {
@@ -432,7 +440,7 @@ export default function QuotesPage() {
         event.target.value = "";
       }
     },
-    [parseWithWorker, refreshLibrary]
+    [parseWithWorker, refreshCandidateWords, refreshLibrary]
   );
 
   const handleRemoveFile = useCallback(

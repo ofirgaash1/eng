@@ -18,9 +18,22 @@ import { formatTimeMs } from "../../utils/timeFormat";
 import { hashBlob, readSubtitleText } from "../../utils/file";
 import { upsertSubtitleFile } from "../../data/filesRepo";
 import { getCuesForFile, saveCuesForFile } from "../../data/cuesRepo";
+import { rebuildInboxFromStoredSubtitleFiles } from "../../data/inboxRepo";
 import { getLastSession, saveLastSession } from "../../data/sessionRepo";
 import { parseSrt } from "../../core/parsing/srtParser";
-
+import {
+  buildPrefixedSubtitleFileName,
+  delay,
+  downloadOpenSubtitlesSubtitle,
+  OPEN_SUBTITLES_API_KEYS,
+  OPEN_SUBTITLES_DEFAULT_API_KEY,
+  OPEN_SUBTITLES_FALLBACK_API_KEY,
+  OPEN_SUBTITLES_LOCAL_API_KEY,
+  pickMostDownloadedSubtitle,
+  saveBlobAsDownload,
+  searchOpenSubtitlesSubtitles,
+  withOpenSubtitlesApiKeyFallback,
+} from "../../services/openSubtitles";
 
 type WorkerResponse = {
   id: string;
@@ -30,6 +43,7 @@ type WorkerResponse = {
 const RTL_TEXT_RE = /[\u0591-\u07FF\uFB1D-\uFDFD\uFE70-\uFEFC]/;
 const VOLUME_STEPS = [1, 2, 3, 4, 5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100];
 const INVALID_SUBTITLE_MESSAGE = "No valid subtitle cues found. Use a valid .srt file.";
+const QUICK_SUBTITLE_GAP_MS = 350;
 // layering markers: pointer-events-none flex flex-wrap | pointer-events-auto relative z-50
 
 function detectRtlFromCues(cues: Cue[]): boolean {
@@ -52,6 +66,22 @@ function openDefinitionSearch(word: string) {
   window.open(`https://www.google.com/search?q=${encoded}`, "_blank", "noopener,noreferrer");
 }
 
+function getQuickSubtitleApiKeys(language: string) {
+  if (language === "he") {
+    return [
+      OPEN_SUBTITLES_FALLBACK_API_KEY,
+      OPEN_SUBTITLES_LOCAL_API_KEY,
+      OPEN_SUBTITLES_DEFAULT_API_KEY,
+    ];
+  }
+
+  return [
+    OPEN_SUBTITLES_LOCAL_API_KEY,
+    OPEN_SUBTITLES_FALLBACK_API_KEY,
+    OPEN_SUBTITLES_DEFAULT_API_KEY,
+  ];
+}
+
 export { SubtitleCue, SubtitleCueBackground };
 
 export default function PlayerPage({ isActive = true }: { isActive?: boolean }) {
@@ -59,7 +89,15 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const workerRef = useRef<Worker | null>(null);
   const pendingParseRef = useRef<
-    Map<string, { hash: string; fileName: string; target: "primary" | "secondary" }>
+    Map<
+      string,
+      {
+        hash: string;
+        fileName: string;
+        target: "primary" | "secondary";
+        rebuildInbox?: boolean;
+      }
+    >
   >(new Map());
   const latestParseRef = useRef<{ primary?: string; secondary?: string }>({});
   const videoName = useSessionStore((state) => state.videoName);
@@ -94,15 +132,21 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
   const [showCursor, setShowCursor] = useState<boolean>(true);
   const [skipSubtitleGaps, setSkipSubtitleGaps] = useState<boolean>(false);
   const [pendingVideoName, setPendingVideoName] = useState<string | null>(null);
+  const [showQuickSubtitleDownload, setShowQuickSubtitleDownload] = useState<boolean>(false);
+  const [quickSubtitleStatus, setQuickSubtitleStatus] = useState<string | null>(null);
+  const [quickSubtitleError, setQuickSubtitleError] = useState<string | null>(null);
+  const [quickSubtitleLoading, setQuickSubtitleLoading] = useState<boolean>(false);
   const hideControlsTimeoutRef = useRef<number | null>(null);
   const hideCursorTimeoutRef = useRef<number | null>(null);
   const volumeOverlayTimeoutRef = useRef<number | null>(null);
+  const quickSubtitleTimeoutRef = useRef<number | null>(null);
   const lastVideoTimeSavedRef = useRef<number>(0);
   const restoreAttemptedRef = useRef<boolean>(false);
   const addWord = useDictionaryStore((state) => state.addUnknownWordFromToken);
   const classForToken = useDictionaryStore((state) => state.classForToken);
   const initializeDictionary = useDictionaryStore((state) => state.initialize);
   const dictionaryReady = useDictionaryStore((state) => state.initialized);
+  const refreshCandidateWords = useDictionaryStore((state) => state.refreshCandidateWords);
   const initializePrefs = usePrefsStore((state) => state.initialize);
   const prefsInitialized = usePrefsStore((state) => state.initialized);
   const setLastOpened = usePrefsStore((state) => state.setLastOpened);
@@ -165,6 +209,22 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
     },
     [applySecondaryCuesState],
   );
+
+  const rebuildInboxAfterSubtitleImport = useCallback(async () => {
+    await rebuildInboxFromStoredSubtitleFiles();
+    await refreshCandidateWords();
+  }, [refreshCandidateWords]);
+
+  const scheduleQuickSubtitleDownloadHint = useCallback(() => {
+    setShowQuickSubtitleDownload(true);
+    if (quickSubtitleTimeoutRef.current !== null) {
+      window.clearTimeout(quickSubtitleTimeoutRef.current);
+    }
+    quickSubtitleTimeoutRef.current = window.setTimeout(() => {
+      setShowQuickSubtitleDownload(false);
+      quickSubtitleTimeoutRef.current = null;
+    }, 5000);
+  }, []);
 
   useEffect(() => {
     if (!dictionaryReady) {
@@ -293,9 +353,13 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
         if (pending.target === "secondary") {
           setSecondarySubtitleError(null);
           await applyParsedSecondaryCues(pending.hash, pending.fileName, event.data.cues);
+          setSecondarySubtitleEnabled(true);
         } else {
           setSubtitleError(null);
           await applyParsedCues(pending.hash, pending.fileName, event.data.cues);
+        }
+        if (pending.rebuildInbox) {
+          await rebuildInboxAfterSubtitleImport();
         }
       } catch (error) {
         console.error(error);
@@ -319,7 +383,21 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
     return () => {
       worker.removeEventListener("message", handleMessage);
     };
-  }, [applyParsedCues, applyParsedSecondaryCues, applyPrimaryCuesState, applySecondaryCuesState]);
+  }, [
+    applyParsedCues,
+    applyParsedSecondaryCues,
+    applyPrimaryCuesState,
+    applySecondaryCuesState,
+    rebuildInboxAfterSubtitleImport,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      if (quickSubtitleTimeoutRef.current !== null) {
+        window.clearTimeout(quickSubtitleTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const ensureLibraryAccess = useCallback(async () => {
     if (!mediaLibrary?.handle) {
@@ -758,113 +836,189 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
   }, [showVolumeOverlay]);
 
   const processSubtitleFile = useCallback(
-    async (file: File) => {
+    async (file: File, options: { rebuildInbox?: boolean } = {}) => {
+      const shouldRebuildInbox = options.rebuildInbox ?? true;
+      let queuedWorker = false;
+
       resetPlayback();
       setSubtitleError(null);
       setSubtitleLoading(true);
       setCurrentTimeMs(0);
-      const text = await readSubtitleText(file);
-      const hash = await hashBlob(file);
-
-      setSubtitleName(file.name);
-      applyPrimaryCuesState([]);
-
-      void saveLastSession({
-        subtitleName: file.name,
-        subtitleText: text,
-        subtitleHash: hash,
-      });
-
-      const cached = await getCuesForFile(hash);
-      if (cached) {
-        applyPrimaryCuesState(cached);
-        setSubtitleLoading(false);
-        await upsertSubtitleFile({ name: file.name, bytesHash: hash, totalCues: cached.length });
-        return;
-      }
-
-      const worker = workerRef.current;
-      if (worker) {
-        const requestId = crypto.randomUUID();
-        pendingParseRef.current.set(requestId, { hash, fileName: file.name, target: "primary" });
-        latestParseRef.current.primary = requestId;
-        worker.postMessage({ id: requestId, text });
-        return;
-      }
 
       try {
+        const text = await readSubtitleText(file);
+        const hash = await hashBlob(file);
+
+        setSubtitleName(file.name);
+        applyPrimaryCuesState([]);
+
+        void saveLastSession({
+          subtitleName: file.name,
+          subtitleText: text,
+          subtitleHash: hash,
+        });
+
+        const cached = await getCuesForFile(hash);
+        if (cached) {
+          applyPrimaryCuesState(cached);
+          await upsertSubtitleFile({ name: file.name, bytesHash: hash, totalCues: cached.length });
+          if (shouldRebuildInbox) {
+            await rebuildInboxAfterSubtitleImport();
+          }
+          return true;
+        }
+
+        const worker = workerRef.current;
+        if (worker) {
+          const requestId = crypto.randomUUID();
+          pendingParseRef.current.set(requestId, {
+            hash,
+            fileName: file.name,
+            target: "primary",
+            rebuildInbox: shouldRebuildInbox,
+          });
+          latestParseRef.current.primary = requestId;
+          worker.postMessage({ id: requestId, text });
+          queuedWorker = true;
+          return true;
+        }
+
         const parsed = parseSrt(text).map((cue) => ({
           ...cue,
           tokens: cue.tokens ?? tokenize(cue.rawText),
         }));
         await applyParsedCues(hash, file.name, parsed);
+        if (shouldRebuildInbox) {
+          await rebuildInboxAfterSubtitleImport();
+        }
+        return true;
       } catch (error) {
         setSubtitleError(error instanceof Error ? error.message : "Failed to parse subtitles");
         applyPrimaryCuesState([]);
+        return false;
       } finally {
-        setSubtitleLoading(false);
+        if (!queuedWorker) {
+          setSubtitleLoading(false);
+        }
       }
     },
-    [applyParsedCues, applyPrimaryCuesState, resetPlayback],
+    [applyParsedCues, applyPrimaryCuesState, rebuildInboxAfterSubtitleImport, resetPlayback],
   );
 
   const processSecondarySubtitleFile = useCallback(
-    async (file: File) => {
+    async (file: File, options: { rebuildInbox?: boolean } = {}) => {
+      const shouldRebuildInbox = options.rebuildInbox ?? true;
+      let queuedWorker = false;
+
       setSecondarySubtitleError(null);
       setSecondarySubtitleLoading(true);
-      const text = await readSubtitleText(file);
-      const hash = await hashBlob(file);
-
-      setSecondarySubtitleName(file.name);
-      applySecondaryCuesState([]);
-
-      void saveLastSession({
-        secondarySubtitleName: file.name,
-        secondarySubtitleText: text,
-        secondarySubtitleHash: hash,
-        secondarySubtitleEnabled: true,
-      });
-
-      const cached = await getCuesForFile(hash);
-      if (cached) {
-        applySecondaryCuesState(cached);
-        setSecondarySubtitleLoading(false);
-        setSecondarySubtitleEnabled(true);
-        await upsertSubtitleFile({ name: file.name, bytesHash: hash, totalCues: cached.length });
-        return;
-      }
-
-      const worker = workerRef.current;
-      if (worker) {
-        const requestId = crypto.randomUUID();
-        pendingParseRef.current.set(requestId, {
-          hash,
-          fileName: file.name,
-          target: "secondary",
-        });
-        latestParseRef.current.secondary = requestId;
-        worker.postMessage({ id: requestId, text });
-        return;
-      }
 
       try {
+        const text = await readSubtitleText(file);
+        const hash = await hashBlob(file);
+
+        setSecondarySubtitleName(file.name);
+        applySecondaryCuesState([]);
+
+        void saveLastSession({
+          secondarySubtitleName: file.name,
+          secondarySubtitleText: text,
+          secondarySubtitleHash: hash,
+          secondarySubtitleEnabled: true,
+        });
+
+        const cached = await getCuesForFile(hash);
+        if (cached) {
+          applySecondaryCuesState(cached);
+          setSecondarySubtitleEnabled(true);
+          await upsertSubtitleFile({ name: file.name, bytesHash: hash, totalCues: cached.length });
+          if (shouldRebuildInbox) {
+            await rebuildInboxAfterSubtitleImport();
+          }
+          return true;
+        }
+
+        const worker = workerRef.current;
+        if (worker) {
+          const requestId = crypto.randomUUID();
+          pendingParseRef.current.set(requestId, {
+            hash,
+            fileName: file.name,
+            target: "secondary",
+            rebuildInbox: shouldRebuildInbox,
+          });
+          latestParseRef.current.secondary = requestId;
+          worker.postMessage({ id: requestId, text });
+          queuedWorker = true;
+          return true;
+        }
+
         const parsed = parseSrt(text).map((cue) => ({
           ...cue,
           tokens: cue.tokens ?? tokenize(cue.rawText),
         }));
         await applyParsedSecondaryCues(hash, file.name, parsed);
         setSecondarySubtitleEnabled(true);
+        if (shouldRebuildInbox) {
+          await rebuildInboxAfterSubtitleImport();
+        }
+        return true;
       } catch (error) {
         setSecondarySubtitleError(
           error instanceof Error ? error.message : "Failed to parse secondary subtitles",
         );
         applySecondaryCuesState([]);
+        return false;
       } finally {
-        setSecondarySubtitleLoading(false);
+        if (!queuedWorker) {
+          setSecondarySubtitleLoading(false);
+        }
       }
     },
-    [applyParsedSecondaryCues, applySecondaryCuesState],
+    [
+      applyParsedSecondaryCues,
+      applySecondaryCuesState,
+      rebuildInboxAfterSubtitleImport,
+    ],
   );
+
+  const downloadBestSubtitleForLanguage = useCallback(async (language: string) => {
+    const apiKeys = getQuickSubtitleApiKeys(language);
+    const searchResult = await withOpenSubtitlesApiKeyFallback(
+      apiKeys,
+      async (apiKey) => {
+        const payload = await searchOpenSubtitlesSubtitles({
+          apiKey,
+          query: videoName,
+          language,
+        });
+        return {
+          apiKey,
+          item: pickMostDownloadedSubtitle(payload.items),
+        };
+      },
+    );
+
+    if (!searchResult.item) {
+      return null;
+    }
+    const selectedItem = searchResult.item;
+    await delay(QUICK_SUBTITLE_GAP_MS);
+
+    const download = await withOpenSubtitlesApiKeyFallback(
+      [searchResult.apiKey, ...apiKeys, ...OPEN_SUBTITLES_API_KEYS],
+      async (apiKey) =>
+        downloadOpenSubtitlesSubtitle({
+          apiKey,
+          item: selectedItem,
+        }),
+    );
+
+    return {
+      ...download,
+      language,
+    };
+  }, [videoName]);
 
   const handleVideoUpload = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
@@ -886,6 +1040,10 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
       lastVideoTimeSavedRef.current = 0;
       setCurrentTimeMs(0);
       setVideoFromFile(videoFile);
+      setQuickSubtitleError(null);
+      setQuickSubtitleStatus(null);
+      setQuickSubtitleLoading(false);
+      scheduleQuickSubtitleDownloadHint();
 
       void saveLastSession({ videoName: videoFile.name, videoTimeSeconds: 0 });
 
@@ -900,7 +1058,7 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
 
       event.target.value = "";
     },
-    [processSubtitleFile, resetPlayback],
+    [processSubtitleFile, resetPlayback, scheduleQuickSubtitleDownloadHint],
   );
 
   const handleSubtitleUpload = useCallback(
@@ -926,6 +1084,92 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
     },
     [processSecondarySubtitleFile],
   );
+
+  const handleQuickSubtitleDownload = useCallback(async () => {
+    if (!videoName.trim()) {
+      setQuickSubtitleError("Select a video file first.");
+      return;
+    }
+
+    if (quickSubtitleTimeoutRef.current !== null) {
+      window.clearTimeout(quickSubtitleTimeoutRef.current);
+      quickSubtitleTimeoutRef.current = null;
+    }
+    setShowQuickSubtitleDownload(false);
+    setQuickSubtitleLoading(true);
+    setQuickSubtitleError(null);
+    setQuickSubtitleStatus("Searching top English subtitle…");
+
+    const outcomes: string[] = [];
+    let importedAnySubtitle = false;
+
+    try {
+      const englishResult = await downloadBestSubtitleForLanguage("en");
+      await delay(QUICK_SUBTITLE_GAP_MS);
+      setQuickSubtitleStatus("Searching top Hebrew subtitle…");
+      const hebrewResult = await downloadBestSubtitleForLanguage("he");
+
+      if (!englishResult && !hebrewResult) {
+        setQuickSubtitleError("No English or Hebrew subtitles were found for this video.");
+        setQuickSubtitleStatus(null);
+        return;
+      }
+
+      if (englishResult) {
+        const englishFile = new File([englishResult.blob], englishResult.fileName, {
+          type: "application/x-subrip",
+        });
+        const loaded = await processSubtitleFile(englishFile, { rebuildInbox: false });
+        if (loaded) {
+          outcomes.push("English loaded into subtitle 1");
+          importedAnySubtitle = true;
+        } else {
+          const fallbackName = buildPrefixedSubtitleFileName("eng", videoName);
+          saveBlobAsDownload(englishResult.blob, fallbackName);
+          outcomes.push(`English downloaded as ${fallbackName}`);
+        }
+      } else {
+        outcomes.push("No English subtitle found");
+      }
+
+      if (hebrewResult) {
+        const hebrewFile = new File([hebrewResult.blob], hebrewResult.fileName, {
+          type: "application/x-subrip",
+        });
+        const loaded = await processSecondarySubtitleFile(hebrewFile, {
+          rebuildInbox: false,
+        });
+        if (loaded) {
+          outcomes.push("Hebrew loaded into subtitle 2");
+          importedAnySubtitle = true;
+        } else {
+          const fallbackName = buildPrefixedSubtitleFileName("heb", videoName);
+          saveBlobAsDownload(hebrewResult.blob, fallbackName);
+          outcomes.push(`Hebrew downloaded as ${fallbackName}`);
+        }
+      } else {
+        outcomes.push("No Hebrew subtitle found");
+      }
+
+      if (importedAnySubtitle) {
+        await rebuildInboxAfterSubtitleImport();
+      }
+      setQuickSubtitleStatus(outcomes.join(". "));
+    } catch (error) {
+      setQuickSubtitleStatus(null);
+      setQuickSubtitleError(
+        error instanceof Error ? error.message : "Quick subtitle download failed.",
+      );
+    } finally {
+      setQuickSubtitleLoading(false);
+    }
+  }, [
+    downloadBestSubtitleForLanguage,
+    processSecondarySubtitleFile,
+    processSubtitleFile,
+    rebuildInboxAfterSubtitleImport,
+    videoName,
+  ]);
 
   const handleTimeUpdate = () => {
     const video = videoRef.current;
@@ -1442,6 +1686,24 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
                 Automatically pairs a matching .srt when selected together.
               </span>
               <span className="text-xs text-white/60">Current: {videoName || "None"}</span>
+              {showQuickSubtitleDownload && videoName && (
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    void handleQuickSubtitleDownload();
+                  }}
+                  className="inline-flex w-fit items-center rounded-full border border-sky-400/40 bg-sky-400/10 px-3 py-1 text-xs font-medium text-sky-100 transition hover:bg-sky-400/20"
+                >
+                  Quick subtitles download
+                </button>
+              )}
+              {quickSubtitleLoading && (
+                <span className="text-xs text-sky-200">Searching English + Hebrew subtitles…</span>
+              )}
+              {quickSubtitleStatus && <span className="text-xs text-white/70">{quickSubtitleStatus}</span>}
+              {quickSubtitleError && <span className="text-xs text-red-400">{quickSubtitleError}</span>}
             </label>
             <label className="flex w-full cursor-pointer flex-col gap-2 rounded-lg border border-dashed border-white/20 bg-white/5 p-4 text-sm hover:border-white/40">
               <span className="font-medium">Load subtitles (SRT)</span>

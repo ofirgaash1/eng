@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CandidateWordStat, Cue, UnknownWord } from "../../core/types";
+import type { CandidateWordStat, UnknownWord } from "../../core/types";
 import { useDictionaryStore } from "../../state/dictionaryStore";
 import { getFrequencyRankForWord, loadFrequencyRanks } from "../../utils/frequencyRanks";
-import { listSubtitleFiles } from "../../data/filesRepo";
-import { getCuesForFile } from "../../data/cuesRepo";
-import { rebuildAllCandidateWords } from "../../data/candidateWordsRepo";
 import { stem as stemWord } from "../../core/nlp/stem";
+import { rebuildInboxFromStoredSubtitleFiles } from "../../data/inboxRepo";
 
 type SortField = "alphabetical" | "updatedAt" | "frequencyRank";
 type SortDirection = "asc" | "desc";
@@ -399,17 +397,11 @@ export default function WordsPage() {
     setImportError(null);
     setImportSuccess(null);
     try {
-      const files = await listSubtitleFiles();
-      const records: Array<{ fileHash: string; cues: Cue[] }> = [];
-      for (const file of files) {
-        const cues = await getCuesForFile(file.bytesHash);
-        if (cues && cues.length > 0) {
-          records.push({ fileHash: file.bytesHash, cues });
-        }
-      }
-      await rebuildAllCandidateWords(records);
+      const rebuiltCount = await rebuildInboxFromStoredSubtitleFiles();
       await refreshCandidateWords();
-      setImportSuccess(`Rebuilt inbox from ${records.length} subtitle file${records.length === 1 ? "" : "s"}.`);
+      setImportSuccess(
+        `Rebuilt inbox from ${rebuiltCount} subtitle file${rebuiltCount === 1 ? "" : "s"}.`,
+      );
     } catch (error) {
       setImportError(error instanceof Error ? error.message : "Failed to rebuild inbox.");
     } finally {

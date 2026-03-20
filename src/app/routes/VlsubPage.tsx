@@ -1,10 +1,17 @@
 import { useCallback, useMemo, useState } from "react";
+import {
+  downloadOpenSubtitlesSubtitle,
+  OPEN_SUBTITLES_DEFAULT_API_KEY,
+  OPEN_SUBTITLES_FALLBACK_API_KEY,
+  OPEN_SUBTITLES_LOCAL_API_KEY,
+  type OpenSubtitlesItem,
+  saveBlobAsDownload,
+  searchOpenSubtitlesSubtitles,
+} from "../../services/openSubtitles";
 
-const API_BASE = "https://api.opensubtitles.com/api/v1";
-const DEFAULT_API_KEY = "oq1XXcuCnNOnaFDKbknI2pxaQO8TiiU5";
-const LOCAL_API_KEY = "Er4Y8GbS7JoCcLf9oJmjc2noj2wIsrNu";
-const FALLBACK_API_KEY = "UVUt5ZRVmROJD7ot9JVJY63n8RTIhxYW";
-const API_CONSUMER_NAME = "ofir gaash v1.0";
+const DEFAULT_API_KEY = OPEN_SUBTITLES_DEFAULT_API_KEY;
+const LOCAL_API_KEY = OPEN_SUBTITLES_LOCAL_API_KEY;
+const FALLBACK_API_KEY = OPEN_SUBTITLES_FALLBACK_API_KEY;
 
 type StatusTone = "neutral" | "loading" | "success" | "error";
 
@@ -14,71 +21,8 @@ type StatusMessage = {
   tone: StatusTone;
 };
 
-type SubtitleFile = {
-  file_id: number;
-  file_name: string;
-  file_size?: number;
-};
-
-type SubtitleItem = {
-  id: string;
-  attributes: {
-    release?: string;
-    language: string;
-    download_count?: number;
-    hearing_impaired?: boolean;
-    feature_details?: {
-      title?: string;
-    };
-    files?: SubtitleFile[];
-  };
-};
-
 type SortField = "title" | "downloads" | "hearingImpaired";
 type SortDirection = "asc" | "desc";
-
-const buildHeaders = (apiKey: string) => ({
-  "Api-Key": apiKey.trim(),
-  "Content-Type": "application/json",
-  "X-User-Agent": API_CONSUMER_NAME,
-});
-
-const ensureSrtFileName = (name: string | undefined, fallbackId: string) => {
-  const trimmed = name?.trim() || `subtitle-${fallbackId}`;
-  if (/\.srt$/i.test(trimmed)) {
-    return trimmed;
-  }
-  if (/\.[^.\\/]+$/.test(trimmed)) {
-    return trimmed.replace(/\.[^.\\/]+$/, ".srt");
-  }
-  return `${trimmed}.srt`;
-};
-
-const describeResponse = async (response: Response) => {
-  let bodyText = "";
-  try {
-    bodyText = await response.text();
-  } catch (error) {
-    bodyText = `Unable to read response body: ${(error as Error).message}`;
-  }
-
-  const requestId =
-    response.headers.get("x-kong-request-id") ||
-    response.headers.get("x-request-id") ||
-    response.headers.get("x-amzn-requestid");
-  const retryAfter = response.headers.get("retry-after");
-  const contentType = response.headers.get("content-type");
-
-  const lines = [
-    `Status: ${response.status} ${response.statusText}`.trim(),
-    requestId ? `Request ID: ${requestId}` : null,
-    retryAfter ? `Retry-After: ${retryAfter}` : null,
-    contentType ? `Content-Type: ${contentType}` : null,
-    bodyText ? `Body: ${bodyText.slice(0, 800)}` : null,
-  ].filter(Boolean);
-
-  return lines.join("\n");
-};
 
 const toneStyles: Record<StatusTone, string> = {
   neutral: "border-white/10 bg-white/5 text-white/70",
@@ -95,7 +39,7 @@ export default function VlsubPage() {
     summary: "",
     tone: "neutral",
   });
-  const [results, setResults] = useState<SubtitleItem[] | null>(null);
+  const [results, setResults] = useState<OpenSubtitlesItem[] | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [sortField, setSortField] = useState<SortField>("downloads");
@@ -131,25 +75,14 @@ export default function VlsubPage() {
       setIsSearching(true);
 
       try {
-        const url = new URL(`${API_BASE}/subtitles`);
-        Object.entries(params).forEach(([key, value]) => {
-          if (value) {
-            url.searchParams.set(key, value);
-          }
+        const payload = await searchOpenSubtitlesSubtitles({
+          apiKey,
+          query: params.query,
+          language: params.languages,
         });
-
-        const response = await fetch(url, { headers: buildHeaders(apiKey) });
-        if (!response.ok) {
-          const details = await describeResponse(response);
-          throw new Error(`Search failed.\n${details}`);
-        }
-        const payload = (await response.json()) as {
-          data?: SubtitleItem[];
-          total_count?: number;
-        };
-        setResults(payload.data ?? []);
+        setResults(payload.items);
         updateStatus(
-          `Found ${payload.total_count ?? payload.data?.length ?? 0} subtitle(s).`,
+          `Found ${payload.totalCount} subtitle(s).`,
           "success",
         );
       } catch (error) {
@@ -172,45 +105,13 @@ export default function VlsubPage() {
     });
   };
 
-  const handleDownload = useCallback(async (item: SubtitleItem) => {
-    const fileInfo = item.attributes.files?.[0];
-    if (!fileInfo?.file_id) {
-      updateStatus("This subtitle entry does not include a file id.", "error");
-      return;
-    }
+  const handleDownload = useCallback(async (item: OpenSubtitlesItem) => {
     setDownloadingId(item.id);
     updateStatus("Preparing download...", "loading");
     try {
-      const response = await fetch(`${API_BASE}/download`, {
-        method: "POST",
-        headers: buildHeaders(apiKey),
-        body: JSON.stringify({ file_id: fileInfo.file_id }),
-      });
-      if (!response.ok) {
-        const details = await describeResponse(response);
-        throw new Error(`Download request failed.\n${details}`);
-      }
-      const payload = (await response.json()) as { link?: string; file_name?: string };
-      if (!payload.link) {
-        throw new Error("Download request succeeded but returned no link.");
-      }
-
-      const fileName = ensureSrtFileName(payload.file_name ?? fileInfo.file_name, item.id);
+      const { blob, fileName } = await downloadOpenSubtitlesSubtitle({ apiKey, item });
       updateStatus(`Downloading ${fileName}...`, "loading");
-      const fileResponse = await fetch(payload.link);
-      if (!fileResponse.ok) {
-        const details = await describeResponse(fileResponse);
-        throw new Error(`Subtitle download failed.\n${details}`);
-      }
-      const blob = await fileResponse.blob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = fileName;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      saveBlobAsDownload(blob, fileName);
       updateStatus(`Downloaded ${fileName}.`, "success");
     } catch (error) {
       const message = (error as Error).message || "Subtitle download failed.";
@@ -480,7 +381,11 @@ export default function VlsubPage() {
                           <button
                             type="button"
                             onClick={() => void handleDownload(item)}
-                            disabled={isSearching || downloadingId === item.id || !fileInfo?.file_id}
+                            disabled={
+                              isSearching ||
+                              downloadingId === item.id ||
+                              !item.attributes.files?.some((file) => Number.isFinite(file.file_id))
+                            }
                             className="inline-flex min-w-[9.5rem] items-center justify-center whitespace-nowrap rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
                           >
                             {downloadingId === item.id ? "Downloading..." : "Download subtitle"}
