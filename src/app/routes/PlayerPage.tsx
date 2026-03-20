@@ -1101,7 +1101,6 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
     setQuickSubtitleStatus("Searching top English subtitle…");
 
     const outcomes: string[] = [];
-    let importedAnySubtitle = false;
 
     try {
       const englishResult = await downloadBestSubtitleForLanguage("en");
@@ -1119,10 +1118,9 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
         const englishFile = new File([englishResult.blob], englishResult.fileName, {
           type: "application/x-subrip",
         });
-        const loaded = await processSubtitleFile(englishFile, { rebuildInbox: false });
+        const loaded = await processSubtitleFile(englishFile);
         if (loaded) {
           outcomes.push("English loaded into subtitle 1");
-          importedAnySubtitle = true;
         } else {
           const fallbackName = buildPrefixedSubtitleFileName("eng", videoName);
           saveBlobAsDownload(englishResult.blob, fallbackName);
@@ -1136,12 +1134,9 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
         const hebrewFile = new File([hebrewResult.blob], hebrewResult.fileName, {
           type: "application/x-subrip",
         });
-        const loaded = await processSecondarySubtitleFile(hebrewFile, {
-          rebuildInbox: false,
-        });
+        const loaded = await processSecondarySubtitleFile(hebrewFile);
         if (loaded) {
           outcomes.push("Hebrew loaded into subtitle 2");
-          importedAnySubtitle = true;
         } else {
           const fallbackName = buildPrefixedSubtitleFileName("heb", videoName);
           saveBlobAsDownload(hebrewResult.blob, fallbackName);
@@ -1151,9 +1146,6 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
         outcomes.push("No Hebrew subtitle found");
       }
 
-      if (importedAnySubtitle) {
-        await rebuildInboxAfterSubtitleImport();
-      }
       setQuickSubtitleStatus(outcomes.join(". "));
     } catch (error) {
       setQuickSubtitleStatus(null);
@@ -1167,7 +1159,6 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
     downloadBestSubtitleForLanguage,
     processSecondarySubtitleFile,
     processSubtitleFile,
-    rebuildInboxAfterSubtitleImport,
     videoName,
   ]);
 
