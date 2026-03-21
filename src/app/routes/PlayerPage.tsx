@@ -1115,32 +1115,32 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
       }
 
       if (englishResult) {
-        const englishFile = new File([englishResult.blob], englishResult.fileName, {
+        const fallbackName = buildPrefixedSubtitleFileName("eng", videoName);
+        saveBlobAsDownload(englishResult.blob, fallbackName);
+        const englishFile = new File([englishResult.blob], fallbackName, {
           type: "application/x-subrip",
         });
         const loaded = await processSubtitleFile(englishFile);
         if (loaded) {
-          outcomes.push("English loaded into subtitle 1");
+          outcomes.push(`English saved as ${fallbackName} and loaded into subtitle 1`);
         } else {
-          const fallbackName = buildPrefixedSubtitleFileName("eng", videoName);
-          saveBlobAsDownload(englishResult.blob, fallbackName);
-          outcomes.push(`English downloaded as ${fallbackName}`);
+          outcomes.push(`English saved as ${fallbackName}`);
         }
       } else {
         outcomes.push("No English subtitle found");
       }
 
       if (hebrewResult) {
-        const hebrewFile = new File([hebrewResult.blob], hebrewResult.fileName, {
+        const fallbackName = buildPrefixedSubtitleFileName("heb", videoName);
+        saveBlobAsDownload(hebrewResult.blob, fallbackName);
+        const hebrewFile = new File([hebrewResult.blob], fallbackName, {
           type: "application/x-subrip",
         });
         const loaded = await processSecondarySubtitleFile(hebrewFile);
         if (loaded) {
-          outcomes.push("Hebrew loaded into subtitle 2");
+          outcomes.push(`Hebrew saved as ${fallbackName} and loaded into subtitle 2`);
         } else {
-          const fallbackName = buildPrefixedSubtitleFileName("heb", videoName);
-          saveBlobAsDownload(hebrewResult.blob, fallbackName);
-          outcomes.push(`Hebrew downloaded as ${fallbackName}`);
+          outcomes.push(`Hebrew saved as ${fallbackName}`);
         }
       } else {
         outcomes.push("No Hebrew subtitle found");

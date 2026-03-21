@@ -34,6 +34,8 @@ const defaultPrefs: UserPrefs = {
     toggleSecondarySubtitle: { code: "KeyH", label: "H" },
     mainSubtitleOffsetBack: { code: "BracketLeft", label: "[" },
     mainSubtitleOffsetForward: { code: "BracketRight", label: "]" },
+    secondarySubtitleOffsetBack: { code: "Minus", label: "-" },
+    secondarySubtitleOffsetForward: { code: "Equal", label: "=" },
   },
   mediaLibrary: undefined,
 };
