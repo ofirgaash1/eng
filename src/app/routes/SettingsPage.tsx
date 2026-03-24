@@ -34,6 +34,7 @@ export default function SettingsPage() {
   const [isImporting, setIsImporting] = useState(false);
   const [isCreatingUsername, setIsCreatingUsername] = useState(false);
   const [isPublishingUsername, setIsPublishingUsername] = useState(false);
+  const [isMergingUsername, setIsMergingUsername] = useState(false);
   const [importProgress, setImportProgress] = useState<ImportProgressState | null>(null);
   const [importElapsed, setImportElapsed] = useState(0);
   const [syncUsername, setSyncUsername] = useState("");
@@ -300,7 +301,7 @@ export default function SettingsPage() {
       });
       refreshStoresAfterImport();
       setTransferSuccess(
-        `Imported backup from '${remote.username}'. Current totals: ${counts.words} word${counts.words === 1 ? "" : "s"} and ${counts.subtitleFiles} subtitle file${counts.subtitleFiles === 1 ? "" : "s"}.`,
+        `Imported backup from '${remote.username}' and merged it into local data. Added ${counts.addedWords} word${counts.addedWords === 1 ? "" : "s"} and ${counts.addedSubtitleFiles} subtitle file${counts.addedSubtitleFiles === 1 ? "" : "s"}. Current totals: ${counts.words} word${counts.words === 1 ? "" : "s"} and ${counts.subtitleFiles} subtitle file${counts.subtitleFiles === 1 ? "" : "s"}.`,
       );
     } catch (error) {
       setTransferError(error instanceof Error ? error.message : "Unable to import by username.");
@@ -311,8 +312,66 @@ export default function SettingsPage() {
     }
   };
 
+  const handleMergeAndPublishUsername = async () => {
+    setTransferError(null);
+    setTransferSuccess(null);
+    setSyncStatus(null);
+    setIsMergingUsername(true);
+    setIsImporting(true);
+    try {
+      const username = normalizeSyncUsername(syncUsername);
+      setImportProgress({
+        percent: 5,
+        stage: `Downloading backup for '${username}'`,
+      });
+      const remote = await importBackupFromUsername(username);
+      const summary = summarizeBackup(remote.payload);
+      setSyncUsername(remote.username);
+      setImportProgress({
+        percent: 15,
+        stage: `Downloaded backup (${summary.words} words, ${summary.subtitleFiles} files)`,
+      });
+      const importCounts = await importAllData(remote.payload, {
+        onProgress: (progress) => {
+          setImportProgress({
+            percent: 15 + progress.percent * 0.55,
+            stage: progress.stage,
+          });
+        },
+      });
+      refreshStoresAfterImport();
+      setSyncStatus(`Exporting merged backup for '${remote.username}'...`);
+      setImportProgress({
+        percent: 75,
+        stage: "Exporting merged local backup",
+      });
+      const { payload, counts: exportCounts } = await exportAllData({
+        includeCueTokens: false,
+      });
+      setSyncStatus(`Publishing merged backup for '${remote.username}'...`);
+      setImportProgress({
+        percent: 90,
+        stage: `Publishing merged backup for '${remote.username}'`,
+      });
+      await publishBackupToUsername(remote.username, payload);
+      setTransferSuccess(
+        `Merged remote backup from '${remote.username}' into local data, then replaced the remote snapshot with the merged result. Added ${importCounts.addedWords} word${importCounts.addedWords === 1 ? "" : "s"} and ${importCounts.addedSubtitleFiles} subtitle file${importCounts.addedSubtitleFiles === 1 ? "" : "s"}. Current totals: ${exportCounts.words} word${exportCounts.words === 1 ? "" : "s"} and ${exportCounts.subtitleFiles} subtitle file${exportCounts.subtitleFiles === 1 ? "" : "s"}.`,
+      );
+    } catch (error) {
+      setTransferError(
+        error instanceof Error ? error.message : "Unable to merge from username and publish.",
+      );
+    } finally {
+      setSyncStatus(null);
+      setIsImporting(false);
+      setIsMergingUsername(false);
+      setImportProgress(null);
+    }
+  };
+
   const usernameSyncConfigured = isUsernameSyncConfigured();
-  const transferBusy = isExporting || isImporting || isCreatingUsername || isPublishingUsername;
+  const transferBusy =
+    isExporting || isImporting || isCreatingUsername || isPublishingUsername || isMergingUsername;
 
   return (
     <div className="space-y-6">
@@ -541,6 +600,9 @@ export default function SettingsPage() {
             <p className="text-xs text-white/60">
               Public sync by username. Anyone who knows the username can read or overwrite it.
             </p>
+            <p className="text-xs text-white/60">
+              Publish replaces the remote backup snapshot for that username. Import merges the remote backup into your current local data.
+            </p>
             {!usernameSyncConfigured && (
               <p className="text-xs text-amber-300">
                 Set <code>VITE_USERNAME_SYNC_BASE_URL</code> to enable create, publish, and import by username.
@@ -571,6 +633,14 @@ export default function SettingsPage() {
               className="rounded-md border border-white/20 bg-white/10 px-3 py-2 text-sm font-medium text-white transition hover:border-white/30 hover:bg-white/20 focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:border-white/10 disabled:text-white/40"
             >
               {isImporting ? "Importing..." : "Import by username"}
+            </button>
+            <button
+              type="button"
+              onClick={handleMergeAndPublishUsername}
+              disabled={transferBusy || !usernameSyncConfigured}
+              className="rounded-md border border-sky-400/30 bg-sky-500/10 px-3 py-2 text-sm font-medium text-white transition hover:border-sky-300/50 hover:bg-sky-500/20 focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:border-white/10 disabled:text-white/40"
+            >
+              {isMergingUsername ? "Merging..." : "Import by username, then publish"}
             </button>
           </div>
           {syncStatus && <p className="text-sm text-white/60">{syncStatus}</p>}

@@ -118,6 +118,8 @@ export interface RecentSessionRecord {
   subtitleText?: string;
   subtitleHash?: string;
   subtitleOffsetMs?: number;
+  subtitleTimingLockEnabled?: boolean;
+  subtitleTimingLockBlend?: number;
   videoTimeSeconds?: number;
   secondarySubtitleName?: string;
   secondarySubtitleText?: string;

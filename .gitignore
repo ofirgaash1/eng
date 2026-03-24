@@ -9,3 +9,5 @@ coverage
 src/**/*.js
 src/**/*.js.map
 package-lock.json
+eng.srt
+heb.srt

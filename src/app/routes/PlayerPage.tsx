@@ -21,6 +21,7 @@ import { getCuesForFile, saveCuesForFile } from "../../data/cuesRepo";
 import { rebuildInboxFromStoredSubtitleFiles } from "../../data/inboxRepo";
 import { getLastSession, saveLastSession } from "../../data/sessionRepo";
 import { parseSrt } from "../../core/parsing/srtParser";
+import { buildTimingLockedCues } from "../../core/subtitles/timingLock";
 import {
   buildPrefixedSubtitleFileName,
   delay,
@@ -44,6 +45,7 @@ const RTL_TEXT_RE = /[\u0591-\u07FF\uFB1D-\uFDFD\uFE70-\uFEFC]/;
 const VOLUME_STEPS = [1, 2, 3, 4, 5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100];
 const INVALID_SUBTITLE_MESSAGE = "No valid subtitle cues found. Use a valid .srt file.";
 const QUICK_SUBTITLE_GAP_MS = 350;
+const TIMING_LOCK_GROUP_GAP_MS = 180;
 // layering markers: pointer-events-none flex flex-wrap | pointer-events-auto relative z-50
 
 function detectRtlFromCues(cues: Cue[]): boolean {
@@ -113,6 +115,8 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
   const [currentTimeMs, setCurrentTimeMs] = useState<number>(0);
   const [subtitleLoading, setSubtitleLoading] = useState<boolean>(false);
   const [subtitleOffsetMs, setSubtitleOffsetMs] = useState<number>(0);
+  const [subtitleTimingLockEnabled, setSubtitleTimingLockEnabled] = useState<boolean>(false);
+  const [subtitleTimingLockBlend, setSubtitleTimingLockBlend] = useState<number>(0.5);
   const [subtitleError, setSubtitleError] = useState<string | null>(null);
   const [isSubtitleRtl, setIsSubtitleRtl] = useState<boolean>(false);
   const [secondarySubtitleName, setSecondarySubtitleName] = useState<string>("");
@@ -480,6 +484,12 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
       }
       if (typeof session.subtitleOffsetMs === "number") {
         setSubtitleOffsetMs(session.subtitleOffsetMs);
+      }
+      if (typeof session.subtitleTimingLockEnabled === "boolean") {
+        setSubtitleTimingLockEnabled(session.subtitleTimingLockEnabled);
+      }
+      if (typeof session.subtitleTimingLockBlend === "number") {
+        setSubtitleTimingLockBlend(Math.min(1, Math.max(0, session.subtitleTimingLockBlend)));
       }
       if (typeof session.videoTimeSeconds === "number") {
         setSavedVideoTime(session.videoTimeSeconds);
@@ -1162,24 +1172,45 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
     }
   };
 
+  const timingLockAvailable = cues.length > 0 && secondaryCues.length > 0;
+  const timingLockActive = subtitleTimingLockEnabled && timingLockAvailable;
+  const timingLockResult = useMemo(
+    () =>
+      buildTimingLockedCues({
+        primaryCues: cues,
+        secondaryCues,
+        primaryOffsetMs: subtitleOffsetMs,
+        secondaryOffsetMs: secondarySubtitleOffsetMs,
+        blend: subtitleTimingLockBlend,
+        enabled: timingLockActive,
+        groupGapMs: TIMING_LOCK_GROUP_GAP_MS,
+      }),
+    [
+      cues,
+      secondaryCues,
+      secondarySubtitleOffsetMs,
+      subtitleOffsetMs,
+      subtitleTimingLockBlend,
+      timingLockActive,
+    ],
+  );
+  const effectivePrimaryCues = timingLockResult.primaryCues;
+  const effectiveSecondaryCues = timingLockResult.secondaryCues;
+
   const activeCues = useMemo(
     () =>
-      cues.filter((cue) => {
-        const adjustedStart = cue.startMs + subtitleOffsetMs;
-        const adjustedEnd = cue.endMs + subtitleOffsetMs;
-        return adjustedStart <= currentTimeMs && adjustedEnd >= currentTimeMs;
+      effectivePrimaryCues.filter((cue) => {
+        return cue.startMs <= currentTimeMs && cue.endMs >= currentTimeMs;
       }),
-    [cues, currentTimeMs, subtitleOffsetMs],
+    [currentTimeMs, effectivePrimaryCues],
   );
 
   const activeSecondaryCues = useMemo(
     () =>
-      secondaryCues.filter((cue) => {
-        const adjustedStart = cue.startMs + secondarySubtitleOffsetMs;
-        const adjustedEnd = cue.endMs + secondarySubtitleOffsetMs;
-        return adjustedStart <= currentTimeMs && adjustedEnd >= currentTimeMs;
+      effectiveSecondaryCues.filter((cue) => {
+        return cue.startMs <= currentTimeMs && cue.endMs >= currentTimeMs;
       }),
-    [secondaryCues, currentTimeMs, secondarySubtitleOffsetMs],
+    [currentTimeMs, effectiveSecondaryCues],
   );
 
   const formattedCurrentTime = useMemo(() => formatTimeMs(currentTimeMs), [currentTimeMs]);
@@ -1194,51 +1225,47 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
 
   const findNextCueStartMs = useCallback(
     (timeMs: number) => {
-      for (const cue of cues) {
-        const adjustedStart = cue.startMs + subtitleOffsetMs;
-        if (adjustedStart > timeMs + 50) {
-          return Math.max(0, adjustedStart);
+      for (const cue of effectivePrimaryCues) {
+        if (cue.startMs > timeMs + 50) {
+          return Math.max(0, cue.startMs);
         }
       }
       return null;
     },
-    [cues, subtitleOffsetMs],
+    [effectivePrimaryCues],
   );
 
   const findPreviousCueStartMs = useCallback(
     (timeMs: number) => {
-      for (let index = cues.length - 1; index >= 0; index -= 1) {
-        const cue = cues[index];
-        const adjustedStart = cue.startMs + subtitleOffsetMs;
-        if (adjustedStart < timeMs - 50) {
-          return Math.max(0, adjustedStart);
+      for (let index = effectivePrimaryCues.length - 1; index >= 0; index -= 1) {
+        const cue = effectivePrimaryCues[index];
+        if (cue.startMs < timeMs - 50) {
+          return Math.max(0, cue.startMs);
         }
       }
       return null;
     },
-    [cues, subtitleOffsetMs],
+    [effectivePrimaryCues],
   );
 
   const findGapJumpTargetMs = useCallback(
     (timeMs: number) => {
       let previousEnd: number | null = null;
-      for (const cue of cues) {
-        const adjustedStart = cue.startMs + subtitleOffsetMs;
-        const adjustedEnd = cue.endMs + subtitleOffsetMs;
-        if (timeMs >= adjustedStart && timeMs <= adjustedEnd) {
+      for (const cue of effectivePrimaryCues) {
+        if (timeMs >= cue.startMs && timeMs <= cue.endMs) {
           return null;
         }
-        if (adjustedStart > timeMs) {
+        if (cue.startMs > timeMs) {
           if (previousEnd === null) {
-            return adjustedStart - timeMs > 150 ? Math.max(0, adjustedStart) : null;
+            return cue.startMs - timeMs > 150 ? Math.max(0, cue.startMs) : null;
           }
-          return timeMs - previousEnd > 150 ? Math.max(0, adjustedStart) : null;
+          return timeMs - previousEnd > 150 ? Math.max(0, cue.startMs) : null;
         }
-        previousEnd = adjustedEnd;
+        previousEnd = cue.endMs;
       }
       return null;
     },
-    [cues, subtitleOffsetMs],
+    [effectivePrimaryCues],
   );
 
   const jumpToMs = useCallback((targetMs: number, options: { focus?: boolean } = {}) => {
@@ -1269,6 +1296,24 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
       return next;
     });
   }, []);
+
+  const handleSubtitleTimingLockToggle = useCallback(() => {
+    if (!timingLockAvailable) return;
+    setSubtitleTimingLockEnabled((previous) => {
+      const next = !previous;
+      void saveLastSession({ subtitleTimingLockEnabled: next });
+      return next;
+    });
+  }, [timingLockAvailable]);
+
+  const handleSubtitleTimingBlendChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const next = Math.min(1, Math.max(0, Number(event.target.value)));
+      setSubtitleTimingLockBlend(next);
+      void saveLastSession({ subtitleTimingLockBlend: next });
+    },
+    [],
+  );
 
   const toggleSecondarySubtitle = useCallback(() => {
     if (secondaryCues.length === 0) return;
@@ -1722,6 +1767,69 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/10">
+                    <tr>
+                      <td className="py-3 pr-4">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <span className="font-medium text-white">Lock subtitle timings</span>
+                          <input
+                            type="checkbox"
+                            checked={subtitleTimingLockEnabled}
+                            onChange={handleSubtitleTimingLockToggle}
+                            disabled={!timingLockAvailable}
+                            className="h-3 w-3 rounded border-white/30 bg-slate-900 disabled:opacity-50"
+                          />
+                          <span className="text-xs text-white/60">
+                            {timingLockResult.active
+                              ? `Auto shift ${timingLockResult.autoSecondaryShiftMs >= 0 ? "+" : ""}${(
+                                  timingLockResult.autoSecondaryShiftMs / 1000
+                                ).toFixed(2)}s, aligned ${timingLockResult.matchedSectionCount} sections (${timingLockResult.matchedPrimaryGroupCount}/${timingLockResult.primaryGroupCount} primary groups, ${timingLockResult.matchedSecondaryGroupCount}/${timingLockResult.secondaryGroupCount} secondary groups)`
+                              : !timingLockAvailable
+                                ? "Requires both subtitle files"
+                                : "Timing lock is off"}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="py-3">
+                        <div className="flex items-center justify-end sm:justify-start">
+                          <span className="text-xs text-white/50">
+                            Keeps both subtitle tracks on one blended timeline.
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="py-3 pr-4">
+                        <div className="flex flex-col gap-2">
+                          <span className="font-medium text-white">Timing blend</span>
+                          <input
+                            type="range"
+                            min={0}
+                            max={1}
+                            step={0.05}
+                            value={subtitleTimingLockBlend}
+                            onChange={handleSubtitleTimingBlendChange}
+                            disabled={!timingLockAvailable}
+                            className="w-full max-w-xs accent-sky-400 disabled:opacity-50"
+                          />
+                          <div className="flex max-w-xs justify-between text-[11px] text-white/50">
+                            <span>Sub 1</span>
+                            <span>Average</span>
+                            <span>Sub 2</span>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="py-3">
+                        <div className="flex items-center justify-end sm:justify-start">
+                          <span className="text-xs text-white/60">
+                            {subtitleTimingLockBlend <= 0.1
+                              ? "Using subtitle 1 timings"
+                              : subtitleTimingLockBlend >= 0.9
+                                ? "Using subtitle 2 timings"
+                                : `Blend ${(subtitleTimingLockBlend * 100).toFixed(0)}% toward subtitle 2`}
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
                     <tr>
                       <td className="py-3 pr-4">
                         <div className="flex flex-wrap items-center gap-2">
