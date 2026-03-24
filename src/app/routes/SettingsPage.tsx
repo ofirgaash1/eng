@@ -1,5 +1,12 @@
 import { ChangeEvent, useEffect, useRef, useState } from "react";
 import { exportAllData, importAllData, summarizeBackup } from "../../data/backupRepo";
+import {
+  createUsernameProfile,
+  importBackupFromUsername,
+  isUsernameSyncConfigured,
+  normalizeSyncUsername,
+  publishBackupToUsername,
+} from "../../services/usernameSync";
 import { useDictionaryStore } from "../../state/dictionaryStore";
 import { usePrefsStore } from "../../state/prefsStore";
 
@@ -25,8 +32,12 @@ export default function SettingsPage() {
   const [transferSuccess, setTransferSuccess] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [isCreatingUsername, setIsCreatingUsername] = useState(false);
+  const [isPublishingUsername, setIsPublishingUsername] = useState(false);
   const [importProgress, setImportProgress] = useState<ImportProgressState | null>(null);
   const [importElapsed, setImportElapsed] = useState(0);
+  const [syncUsername, setSyncUsername] = useState("");
+  const [syncStatus, setSyncStatus] = useState<string | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -94,9 +105,17 @@ export default function SettingsPage() {
     await setMediaLibrary(undefined);
   };
 
+  const refreshStoresAfterImport = () => {
+    usePrefsStore.setState({ initialized: false });
+    void usePrefsStore.getState().initialize();
+    useDictionaryStore.setState({ initialized: false });
+    void useDictionaryStore.getState().initialize();
+  };
+
   const handleExportEverything = async () => {
     setTransferError(null);
     setTransferSuccess(null);
+    setSyncStatus(null);
     setIsExporting(true);
     try {
       const { payload, counts } = await exportAllData({
@@ -129,6 +148,7 @@ export default function SettingsPage() {
     if (files.length === 0) return;
     setTransferError(null);
     setTransferSuccess(null);
+    setSyncStatus(null);
     setIsImporting(true);
     try {
       const totalFiles = files.length;
@@ -191,10 +211,7 @@ export default function SettingsPage() {
         });
       }
 
-      usePrefsStore.setState({ initialized: false });
-      void usePrefsStore.getState().initialize();
-      useDictionaryStore.setState({ initialized: false });
-      void useDictionaryStore.getState().initialize();
+      refreshStoresAfterImport();
       if (!counts) {
         throw new Error("Import finished with no result.");
       }
@@ -210,6 +227,92 @@ export default function SettingsPage() {
       event.target.value = "";
     }
   };
+
+  const handleCreateUsername = async () => {
+    setTransferError(null);
+    setTransferSuccess(null);
+    setSyncStatus(null);
+    setIsCreatingUsername(true);
+    try {
+      const username = normalizeSyncUsername(syncUsername);
+      setSyncStatus(`Creating username '${username}'...`);
+      const result = await createUsernameProfile(username);
+      setSyncUsername(result.username);
+      setTransferSuccess(`Created username '${result.username}'.`);
+    } catch (error) {
+      setTransferError(error instanceof Error ? error.message : "Unable to create username.");
+    } finally {
+      setSyncStatus(null);
+      setIsCreatingUsername(false);
+    }
+  };
+
+  const handlePublishToUsername = async () => {
+    setTransferError(null);
+    setTransferSuccess(null);
+    setSyncStatus(null);
+    setIsPublishingUsername(true);
+    try {
+      const username = normalizeSyncUsername(syncUsername);
+      setSyncStatus("Exporting local backup...");
+      const { payload, counts } = await exportAllData({
+        includeCueTokens: false,
+      });
+      setSyncStatus(`Uploading backup for '${username}'...`);
+      const result = await publishBackupToUsername(username, payload);
+      setSyncUsername(result.username);
+      setTransferSuccess(
+        `Published ${counts.words} word${counts.words === 1 ? "" : "s"} and ${counts.subtitleFiles} subtitle file${counts.subtitleFiles === 1 ? "" : "s"} to '${result.username}'.`,
+      );
+    } catch (error) {
+      setTransferError(error instanceof Error ? error.message : "Unable to publish backup.");
+    } finally {
+      setSyncStatus(null);
+      setIsPublishingUsername(false);
+    }
+  };
+
+  const handleImportByUsername = async () => {
+    setTransferError(null);
+    setTransferSuccess(null);
+    setSyncStatus(null);
+    setIsImporting(true);
+    try {
+      const username = normalizeSyncUsername(syncUsername);
+      setImportProgress({
+        percent: 10,
+        stage: `Downloading backup for '${username}'`,
+      });
+      const remote = await importBackupFromUsername(username);
+      const summary = summarizeBackup(remote.payload);
+      setSyncUsername(remote.username);
+      setImportProgress({
+        percent: 20,
+        stage: `Downloaded backup (${summary.words} words, ${summary.subtitleFiles} files)`,
+      });
+      const counts = await importAllData(remote.payload, {
+        onProgress: (progress) => {
+          setImportProgress({
+            percent: progress.percent,
+            stage: progress.stage,
+          });
+        },
+      });
+      refreshStoresAfterImport();
+      setTransferSuccess(
+        `Imported backup from '${remote.username}'. Current totals: ${counts.words} word${counts.words === 1 ? "" : "s"} and ${counts.subtitleFiles} subtitle file${counts.subtitleFiles === 1 ? "" : "s"}.`,
+      );
+    } catch (error) {
+      setTransferError(error instanceof Error ? error.message : "Unable to import by username.");
+    } finally {
+      setSyncStatus(null);
+      setIsImporting(false);
+      setImportProgress(null);
+    }
+  };
+
+  const usernameSyncConfigured = isUsernameSyncConfigured();
+  const transferBusy = isExporting || isImporting || isCreatingUsername || isPublishingUsername;
 
   return (
     <div className="space-y-6">
@@ -400,7 +503,7 @@ export default function SettingsPage() {
           <button
             type="button"
             onClick={handleExportEverything}
-            disabled={isExporting}
+            disabled={transferBusy}
             className="rounded-md border border-white/20 bg-white/10 px-3 py-2 text-sm font-medium text-white transition hover:border-white/30 hover:bg-white/20 focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:border-white/10 disabled:text-white/40"
           >
             {isExporting ? "Exporting..." : "Export everything"}
@@ -408,7 +511,7 @@ export default function SettingsPage() {
           <button
             type="button"
             onClick={() => importInputRef.current?.click()}
-            disabled={isImporting}
+            disabled={transferBusy}
             className="rounded-md border border-white/20 bg-white/10 px-3 py-2 text-sm font-medium text-white transition hover:border-white/30 hover:bg-white/20 focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:border-white/10 disabled:text-white/40"
           >
             {isImporting ? "Importing..." : "Import everything"}
@@ -421,6 +524,56 @@ export default function SettingsPage() {
             className="hidden"
             onChange={handleImportEverything}
           />
+        </div>
+        <div className="space-y-3 rounded-lg border border-white/10 bg-white/5 p-4">
+          <div className="space-y-2">
+            <label className="flex flex-col gap-2 text-sm">
+              <span className="text-white/70">Username sync</span>
+              <input
+                type="text"
+                value={syncUsername}
+                onChange={(event) => setSyncUsername(event.target.value)}
+                placeholder="ofirgaash"
+                className="rounded-md border border-white/10 bg-black/40 px-3 py-2 text-white focus:border-white/40 focus:outline-none disabled:text-white/40"
+                disabled={transferBusy || !usernameSyncConfigured}
+              />
+            </label>
+            <p className="text-xs text-white/60">
+              Public sync by username. Anyone who knows the username can read or overwrite it.
+            </p>
+            {!usernameSyncConfigured && (
+              <p className="text-xs text-amber-300">
+                Set <code>VITE_USERNAME_SYNC_BASE_URL</code> to enable create, publish, and import by username.
+              </p>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={handleCreateUsername}
+              disabled={transferBusy || !usernameSyncConfigured}
+              className="rounded-md border border-white/20 bg-white/10 px-3 py-2 text-sm font-medium text-white transition hover:border-white/30 hover:bg-white/20 focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:border-white/10 disabled:text-white/40"
+            >
+              {isCreatingUsername ? "Creating..." : "Create username"}
+            </button>
+            <button
+              type="button"
+              onClick={handlePublishToUsername}
+              disabled={transferBusy || !usernameSyncConfigured}
+              className="rounded-md border border-white/20 bg-white/10 px-3 py-2 text-sm font-medium text-white transition hover:border-white/30 hover:bg-white/20 focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:border-white/10 disabled:text-white/40"
+            >
+              {isPublishingUsername ? "Publishing..." : "Publish to username"}
+            </button>
+            <button
+              type="button"
+              onClick={handleImportByUsername}
+              disabled={transferBusy || !usernameSyncConfigured}
+              className="rounded-md border border-white/20 bg-white/10 px-3 py-2 text-sm font-medium text-white transition hover:border-white/30 hover:bg-white/20 focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:border-white/10 disabled:text-white/40"
+            >
+              {isImporting ? "Importing..." : "Import by username"}
+            </button>
+          </div>
+          {syncStatus && <p className="text-sm text-white/60">{syncStatus}</p>}
         </div>
         {isImporting && importProgress ? (
           <div className="mt-2 w-full">

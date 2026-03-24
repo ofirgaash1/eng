@@ -1,0 +1,10 @@
+name = "subtitle-word-tracker-sync"
+main = "src/index.ts"
+compatibility_date = "2026-03-24"
+
+[[r2_buckets]]
+binding = "SYNC_BUCKET"
+bucket_name = "subtitle-word-tracker-sync"
+
+[vars]
+ALLOWED_ORIGIN = "*"
