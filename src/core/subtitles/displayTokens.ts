@@ -13,9 +13,9 @@ export type DisplayToken = {
   italic: boolean;
 };
 
-const NO_SPACE_BEFORE_RE = /^[\)\]\}»”’.,!?;:%…،؛؟。！？]+$/u;
-const NO_SPACE_AFTER_RE = /^[\(\[\{«“‘]+$/u;
-const RTL_PREFIX_PUNCT_RE = /^[.]+$/u;
+const NO_SPACE_BEFORE_RE = /^[)"\]\}\u05F3\u05F4»”’.,!?;:%…،؛؟。！？]+$/u;
+const NO_SPACE_AFTER_RE = /^["(\[\{\u05F3\u05F4«“‘]+$/u;
+const RTL_TEXT_RE = /[\u0591-\u07FF\uFB1D-\uFDFD\uFE70-\uFEFC]/u;
 
 export function isWordLikeToken(token: Token): boolean {
   return token.isWord || /^\d+$/.test(token.text);
@@ -27,6 +27,22 @@ function isNoSpaceBefore(token: Token): boolean {
 
 function isNoSpaceAfter(token: Token): boolean {
   return !token.isWord && NO_SPACE_AFTER_RE.test(token.text);
+}
+
+function lineContainsRtl(tokens: StyledToken[]): boolean {
+  return tokens.some(({ token }) => RTL_TEXT_RE.test(token.text));
+}
+
+function moveCompensatedLeadingPunctuationToLineEnd(tokens: StyledToken[]): StyledToken[] {
+  if (!lineContainsRtl(tokens)) return tokens;
+
+  let leadingCount = 0;
+  while (leadingCount < tokens.length && isNoSpaceBefore(tokens[leadingCount].token)) {
+    leadingCount += 1;
+  }
+
+  if (leadingCount === 0) return tokens;
+  return [...tokens.slice(leadingCount), ...tokens.slice(0, leadingCount)];
 }
 
 export function shouldAddSpaceBefore(prev: Token | undefined, next: Token): boolean {
@@ -45,10 +61,14 @@ export function shouldAddSpaceBefore(prev: Token | undefined, next: Token): bool
 }
 
 export function tokenizeWithItalics(text: string): StyledToken[] {
+  return tokenizeLinesWithItalics(text).flat();
+}
+
+export function tokenizeLinesWithItalics(text: string): StyledToken[][] {
   const markerPattern = new RegExp(`(${ITALIC_START}|${ITALIC_END})`, "g");
   const parts = text.split(markerPattern).filter((part) => part.length > 0);
   let italic = false;
-  const tokens: StyledToken[] = [];
+  const lines: StyledToken[][] = [[]];
 
   for (const part of parts) {
     if (part === ITALIC_START) {
@@ -59,36 +79,30 @@ export function tokenizeWithItalics(text: string): StyledToken[] {
       italic = false;
       continue;
     }
-    const chunkTokens = tokenize(part);
-    tokens.push(...chunkTokens.map((token) => ({ token, italic })));
+
+    const lineParts = part.split(/\r?\n/);
+    lineParts.forEach((linePart, index) => {
+      if (linePart.length > 0) {
+        const chunkTokens = tokenize(linePart);
+        lines[lines.length - 1].push(...chunkTokens.map((token) => ({ token, italic })));
+      }
+
+      if (index < lineParts.length - 1) {
+        lines.push([]);
+      }
+    });
   }
 
-  return tokens;
+  return lines;
 }
 
-export function buildDisplayTokens(
-  tokens: StyledToken[],
-  options: { isRtl?: boolean } = {},
-): DisplayToken[] {
-  const { isRtl = false } = options;
+export function buildDisplayTokens(tokens: StyledToken[]): DisplayToken[] {
   const displayTokens: DisplayToken[] = [];
   let prefix = "";
   let prefixItalic = false;
 
   tokens.forEach((token, index) => {
     const next = tokens[index + 1];
-
-    if (
-      isRtl &&
-      !token.token.isWord &&
-      RTL_PREFIX_PUNCT_RE.test(token.token.text) &&
-      next &&
-      isWordLikeToken(next.token)
-    ) {
-      prefix += token.token.text;
-      prefixItalic = prefixItalic || token.italic;
-      return;
-    }
 
     if (!token.token.isWord && isNoSpaceAfter(token.token) && next && isWordLikeToken(next.token)) {
       prefix += token.token.text;
@@ -130,4 +144,10 @@ export function buildDisplayTokens(
   }
 
   return displayTokens;
+}
+
+export function buildDisplayLines(text: string): DisplayToken[][] {
+  return tokenizeLinesWithItalics(text).map((line) =>
+    buildDisplayTokens(moveCompensatedLeadingPunctuationToLineEnd(line)),
+  );
 }

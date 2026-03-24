@@ -1,7 +1,11 @@
 import { stem } from "./stem";
 import type { Token } from "../types";
 
-const WORD_PATTERN = /(\p{L}+(?:['\u2019\u02BC-]\p{L}+)*)|(\d+)|([^\s\p{L}\d]+)/gu;
+const WORD_JOINER_PATTERN = `['"\\u05F3\\u05F4\\u2019\\u02BC-]`;
+const WORD_PATTERN = new RegExp(
+  `(\\p{L}+(?:${WORD_JOINER_PATTERN}\\p{L}+)*)|(\\d+)|([^\\s\\p{L}\\d]+)`,
+  "gu",
+);
 
 export function tokenize(text: string): Token[] {
   const sanitized = text.replace(/[\u0001\u0002]/g, "");

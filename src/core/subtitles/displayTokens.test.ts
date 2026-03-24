@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ITALIC_END, ITALIC_START, parseSrt } from "../parsing/srtParser";
-import { buildDisplayTokens, tokenizeWithItalics } from "./displayTokens";
+import { buildDisplayLines, buildDisplayTokens, tokenizeWithItalics } from "./displayTokens";
 
 const SAMPLE_SRT = `1
 00:00:14,139 --> 00:00:15,419
@@ -60,79 +60,19 @@ describe("subtitle display tokens", () => {
       "are",
       "you?",
     ]);
-
-    const lastTokens = buildDisplayTokens(tokenizeWithItalics(cues[5].rawText)).map(
-      (token) => token.text,
-    );
-    expect(lastTokens).toEqual(["Hello?"]);
   });
 
-  it("merges RTL punctuation so it does not render mid-sentence", () => {
-    const rtlText = `46
-00:03:52,941 --> 00:03:57,070
-שאלה ארבע, מה ארוחת הבוקר
-?האהובה על מר איגן
-`;
+  it("keeps LTR-compensated RTL punctuation within the same subtitle line", () => {
+    const rtlText = `138
+00:06:10,950 --> 00:06:14,300
+"כולל התקליט "החלום של מונק
+.חתום ע"י תלוניוס בעצמו`;
     const [cue] = parseSrt(rtlText);
-    const tokens = buildDisplayTokens(tokenizeWithItalics(cue.rawText), { isRtl: true }).map(
-      (token) => token.text,
-    );
-    expect(tokens).toEqual([
-      "שאלה",
-      "ארבע,",
-      "מה",
-      "ארוחת",
-      "הבוקר?",
-      "האהובה",
-      "על",
-      "מר",
-      "איגן",
-    ]);
-    expect(tokens).not.toContain("?");
-  });
+    const lines = buildDisplayLines(cue.rawText).map((line) => line.map((token) => token.text));
 
-  it("keeps RTL question marks attached to the preceding word across line breaks", () => {
-    const rtlText = `133
-00:15:20,838 --> 00:15:25,133
-מארק, אתה מוכן להניח
-?את כרטיס המפתח שלך על שולחני`;
-    const [cue] = parseSrt(rtlText);
-    const tokens = buildDisplayTokens(tokenizeWithItalics(cue.rawText), { isRtl: true }).map(
-      (token) => token.text,
-    );
-    expect(tokens).toEqual([
-      "מארק,",
-      "אתה",
-      "מוכן",
-      "להניח?",
-      "את",
-      "כרטיס",
-      "המפתח",
-      "שלך",
-      "על",
-      "שולחני",
+    expect(lines).toEqual([
+      ["כולל", "התקליט", "\"החלום", "של", "מונק\""],
+      ["חתום", "ע\"י", "תלוניוס", "בעצמו."],
     ]);
-    expect(tokens).not.toContain("?");
-  });
-
-  it("keeps RTL periods attached to the preceding word across line breaks", () => {
-    const rtlText = `62
-00:09:08,247 --> 00:09:11,751
-ובכן, אנחנו שומעים בקביעות
-.את השם הייזנברג`;
-    const [cue] = parseSrt(rtlText);
-    const tokens = buildDisplayTokens(tokenizeWithItalics(cue.rawText)).map(
-      (token) => token.text,
-    );
-    expect(tokens).toEqual([
-      "ובכן,",
-      "אנחנו",
-      "שומעים",
-      "בקביעות.",
-      "את",
-      "השם",
-      "הייזנברג",
-    ]);
-    expect(tokens).not.toContain(".");
   });
 });

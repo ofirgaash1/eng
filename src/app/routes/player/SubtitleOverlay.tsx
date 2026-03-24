@@ -1,30 +1,73 @@
 import { useMemo } from "react";
 import type { Cue, Token } from "../../../core/types";
 import {
-  buildDisplayTokens,
-  isWordLikeToken,
+  buildDisplayLines,
+  type DisplayToken,
   shouldAddSpaceBefore,
-  tokenizeWithItalics,
 } from "../../../core/subtitles/displayTokens";
 
-function shouldMoveLeadingPunctuation(token: Token): boolean {
-  return !token.isWord && /^[.!?…،؛؟]+$/u.test(token.text);
+function useDisplayLines(cue: Cue) {
+  return useMemo(() => buildDisplayLines(cue.rawText), [cue.rawText]);
 }
 
-function useDisplayTokens(cue: Cue, isRtl: boolean) {
-  const tokens = useMemo(() => tokenizeWithItalics(cue.rawText), [cue.rawText]);
-  const normalizedTokens = useMemo(() => {
-    if (!isRtl) return tokens;
-    const firstWordIndex = tokens.findIndex((token) => isWordLikeToken(token.token));
-    if (firstWordIndex <= 0) return tokens;
-    const leading = tokens.slice(0, firstWordIndex);
-    if (leading.length === 0) return tokens;
-    if (leading.every((token) => shouldMoveLeadingPunctuation(token.token))) {
-      return [...tokens.slice(firstWordIndex), ...leading];
-    }
-    return tokens;
-  }, [isRtl, tokens]);
-  return useMemo(() => buildDisplayTokens(normalizedTokens, { isRtl }), [normalizedTokens, isRtl]);
+function renderTokenButton(
+  displayToken: DisplayToken,
+  index: number,
+  line: DisplayToken[],
+  cue: Cue,
+  onTokenClick: (token: Token, cue: Cue) => void,
+  onTokenContextMenu: (token: Token, cue: Cue) => void,
+  classForToken: (token: Token) => string,
+) {
+  const prevToken = index > 0 ? line[index - 1].token : undefined;
+  const token = displayToken.token;
+  const spacingClass = shouldAddSpaceBefore(prevToken, token) ? "ms-1" : "";
+
+  return (
+    <button
+      key={`${displayToken.text}-${index}`}
+      type="button"
+      className={`pointer-events-auto relative z-50 rounded px-0.5 text-left ${spacingClass} ${
+        token.isWord ? "focus:outline-none focus-visible:outline-none" : "cursor-default"
+      }`}
+      onClick={(event) => {
+        if (!token.isWord) return;
+        onTokenClick(token, cue);
+        if (event.currentTarget instanceof HTMLElement) {
+          event.currentTarget.blur();
+        }
+      }}
+      onContextMenu={(event) => {
+        if (!token.isWord) return;
+        event.preventDefault();
+        onTokenContextMenu(token, cue);
+      }}
+      disabled={!token.isWord}
+    >
+      <bdi
+        dir="auto"
+        className={`rounded px-1 py-0.5 transition-colors ${displayToken.italic ? "italic" : ""} ${classForToken(token)}`}
+      >
+        {displayToken.text}
+      </bdi>
+    </button>
+  );
+}
+
+function renderTokenBackground(displayToken: DisplayToken, index: number, line: DisplayToken[]) {
+  const prevToken = index > 0 ? line[index - 1].token : undefined;
+  const token = displayToken.token;
+  const spacingClass = shouldAddSpaceBefore(prevToken, token) ? "ms-1" : "";
+
+  return (
+    <bdi
+      key={`${displayToken.text}-${index}`}
+      dir="auto"
+      className={`rounded px-1 py-0.5 text-transparent ${spacingClass} ${displayToken.italic ? "italic" : ""}`}
+    >
+      {displayToken.text}
+    </bdi>
+  );
 }
 
 interface SubtitleCueProps {
@@ -44,47 +87,25 @@ export function SubtitleCue({
   isRtl = false,
   className,
 }: SubtitleCueProps) {
-  const displayTokens = useDisplayTokens(cue, isRtl);
+  const displayLines = useDisplayLines(cue);
+
   return (
-    <div
-      className={`pointer-events-none flex flex-wrap ${className ?? ""}`}
-      dir={isRtl ? "rtl" : "ltr"}
-    >
-      {displayTokens.map((displayToken, index) => {
-        const prevToken = index > 0 ? displayTokens[index - 1].token : undefined;
-        const token = displayToken.token;
-        const spacingClass = shouldAddSpaceBefore(prevToken, token) ? "ms-1" : "";
-        return (
-          <button
-            key={`${displayToken.text}-${index}`}
-            type="button"
-            className={`pointer-events-auto relative z-50 rounded px-0.5 text-left ${spacingClass} ${
-              token.isWord ? "focus:outline-none focus-visible:outline-none" : "cursor-default"
-            }`}
-            onClick={(event) => {
-              if (!token.isWord) return;
-              onTokenClick(token, cue);
-              if (event.currentTarget instanceof HTMLElement) {
-                event.currentTarget.blur();
-              }
-            }}
-            onContextMenu={(event) => {
-              if (!token.isWord) return;
-              event.preventDefault();
-              onTokenContextMenu(token, cue);
-            }}
-            disabled={!token.isWord}
-          >
-            <span
-              className={`rounded px-1 py-0.5 transition-colors ${
-                displayToken.italic ? "italic" : ""
-              } ${classForToken(token)}`}
-            >
-              {displayToken.text}
-            </span>
-          </button>
-        );
-      })}
+    <div className="pointer-events-none flex flex-col items-center gap-1" dir={isRtl ? "rtl" : "ltr"}>
+      {displayLines.map((line, lineIndex) => (
+        <div key={`line-${lineIndex}`} className={`pointer-events-none flex flex-wrap ${className ?? ""}`}>
+          {line.map((displayToken, index) =>
+            renderTokenButton(
+              displayToken,
+              index,
+              line,
+              cue,
+              onTokenClick,
+              onTokenContextMenu,
+              classForToken,
+            ),
+          )}
+        </div>
+      ))}
     </div>
   );
 }
@@ -94,22 +115,15 @@ export function SubtitleCueBackground({
   isRtl = false,
   className,
 }: Pick<SubtitleCueProps, "cue" | "isRtl" | "className">) {
-  const displayTokens = useDisplayTokens(cue, isRtl);
+  const displayLines = useDisplayLines(cue);
+
   return (
-    <div className={`flex flex-wrap ${className ?? ""}`} dir={isRtl ? "rtl" : "ltr"}>
-      {displayTokens.map((displayToken, index) => {
-        const prevToken = index > 0 ? displayTokens[index - 1].token : undefined;
-        const token = displayToken.token;
-        const spacingClass = shouldAddSpaceBefore(prevToken, token) ? "ms-1" : "";
-        return (
-          <span
-            key={`${displayToken.text}-${index}`}
-            className={`rounded px-1 py-0.5 text-transparent ${spacingClass} ${displayToken.italic ? "italic" : ""}`}
-          >
-            {displayToken.text}
-          </span>
-        );
-      })}
+    <div className="flex flex-col items-center gap-1" dir={isRtl ? "rtl" : "ltr"}>
+      {displayLines.map((line, lineIndex) => (
+        <div key={`line-${lineIndex}`} className={`flex flex-wrap ${className ?? ""}`}>
+          {line.map((displayToken, index) => renderTokenBackground(displayToken, index, line))}
+        </div>
+      ))}
     </div>
   );
 }

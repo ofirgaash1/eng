@@ -32,6 +32,16 @@ No index line`;
     expect(cues[0]?.rawText).toBe("No index line");
   });
 
+  it("preserves cue line breaks while trimming each line", () => {
+    const input = `1
+00:00:10,000 --> 00:00:11,000
+  first line  
+ second line `;
+
+    const cues = parseSrt(input);
+    expect(cues[0]?.rawText).toBe("first line\nsecond line");
+  });
+
   it("ignores non-SRT content instead of creating fake zero-time cues", () => {
     const input = `{
   "version": 1,

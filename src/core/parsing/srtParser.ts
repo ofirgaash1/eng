@@ -17,10 +17,13 @@ function toMs(timecode: string) {
 
 function sanitizeCueText(text: string) {
   return text
+    .replace(/\r\n?/g, "\n")
     .replace(/<i>/gi, ITALIC_START)
     .replace(/<\/i>/gi, ITALIC_END)
     .replace(/<[^>]+>/g, "")
-    .replace(/\s+/g, " ")
+    .split("\n")
+    .map((line) => line.replace(/[^\S\n]+/g, " ").trim())
+    .join("\n")
     .trim();
 }
 

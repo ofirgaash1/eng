@@ -504,20 +504,7 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
       if (session.secondarySubtitleHash) {
         setSecondarySubtitleLoading(true);
         setSecondarySubtitleError(null);
-        const cachedSecondary = await getCuesForFile(session.secondarySubtitleHash);
-        if (cancelled) {
-          return;
-        }
-
-        if (cachedSecondary) {
-          applySecondaryCuesState(cachedSecondary);
-          setSecondarySubtitleLoading(false);
-          await upsertSubtitleFile({
-            name: session.secondarySubtitleName ?? session.secondarySubtitleHash,
-            bytesHash: session.secondarySubtitleHash,
-            totalCues: cachedSecondary.length,
-          });
-        } else if (session.secondarySubtitleText) {
+        if (session.secondarySubtitleText) {
           const worker = workerRef.current;
           if (worker) {
             const requestId = crypto.randomUUID();
@@ -553,13 +540,65 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
             }
           }
         } else {
-          setSecondarySubtitleLoading(false);
+          const cachedSecondary = await getCuesForFile(session.secondarySubtitleHash);
+          if (cancelled) {
+            return;
+          }
+
+          if (cachedSecondary) {
+            applySecondaryCuesState(cachedSecondary);
+            setSecondarySubtitleLoading(false);
+            await upsertSubtitleFile({
+              name: session.secondarySubtitleName ?? session.secondarySubtitleHash,
+              bytesHash: session.secondarySubtitleHash,
+              totalCues: cachedSecondary.length,
+            });
+          } else {
+            setSecondarySubtitleLoading(false);
+          }
         }
       }
 
       if (session.subtitleHash) {
         setSubtitleLoading(true);
         setSubtitleError(null);
+        if (session.subtitleText) {
+          const worker = workerRef.current;
+          if (worker) {
+            const requestId = crypto.randomUUID();
+            pendingParseRef.current.set(requestId, {
+              hash: session.subtitleHash,
+              fileName: session.subtitleName ?? session.subtitleHash,
+              target: "primary",
+            });
+            latestParseRef.current.primary = requestId;
+            worker.postMessage({ id: requestId, text: session.subtitleText });
+            return;
+          }
+
+          try {
+            const parsed = parseSrt(session.subtitleText).map((cue) => ({
+              ...cue,
+              tokens: cue.tokens ?? tokenize(cue.rawText),
+            }));
+            await applyParsedCues(
+              session.subtitleHash,
+              session.subtitleName ?? session.subtitleHash,
+              parsed,
+            );
+          } catch (error) {
+            if (!cancelled) {
+              setSubtitleError(error instanceof Error ? error.message : "Failed to parse subtitles");
+              applyPrimaryCuesState([]);
+            }
+          } finally {
+            if (!cancelled) {
+              setSubtitleLoading(false);
+            }
+          }
+          return;
+        }
+
         const cached = await getCuesForFile(session.subtitleHash);
         if (cancelled) {
           return;
@@ -576,44 +615,7 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
           return;
         }
 
-        if (!session.subtitleText) {
-          setSubtitleLoading(false);
-          return;
-        }
-
-        const worker = workerRef.current;
-        if (worker) {
-          const requestId = crypto.randomUUID();
-          pendingParseRef.current.set(requestId, {
-            hash: session.subtitleHash,
-            fileName: session.subtitleName ?? session.subtitleHash,
-            target: "primary",
-          });
-          latestParseRef.current.primary = requestId;
-          worker.postMessage({ id: requestId, text: session.subtitleText });
-          return;
-        }
-
-        try {
-          const parsed = parseSrt(session.subtitleText).map((cue) => ({
-            ...cue,
-            tokens: cue.tokens ?? tokenize(cue.rawText),
-          }));
-          await applyParsedCues(
-            session.subtitleHash,
-            session.subtitleName ?? session.subtitleHash,
-            parsed,
-          );
-        } catch (error) {
-          if (!cancelled) {
-            setSubtitleError(error instanceof Error ? error.message : "Failed to parse subtitles");
-            applyPrimaryCuesState([]);
-          }
-        } finally {
-          if (!cancelled) {
-            setSubtitleLoading(false);
-          }
-        }
+        setSubtitleLoading(false);
       }
     };
 
@@ -858,16 +860,6 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
           subtitleHash: hash,
         });
 
-        const cached = await getCuesForFile(hash);
-        if (cached) {
-          applyPrimaryCuesState(cached);
-          await upsertSubtitleFile({ name: file.name, bytesHash: hash, totalCues: cached.length });
-          if (shouldRebuildInbox) {
-            await rebuildInboxAfterSubtitleImport();
-          }
-          return true;
-        }
-
         const worker = workerRef.current;
         if (worker) {
           const requestId = crypto.randomUUID();
@@ -926,17 +918,6 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
           secondarySubtitleHash: hash,
           secondarySubtitleEnabled: true,
         });
-
-        const cached = await getCuesForFile(hash);
-        if (cached) {
-          applySecondaryCuesState(cached);
-          setSecondarySubtitleEnabled(true);
-          await upsertSubtitleFile({ name: file.name, bytesHash: hash, totalCues: cached.length });
-          if (shouldRebuildInbox) {
-            await rebuildInboxAfterSubtitleImport();
-          }
-          return true;
-        }
 
         const worker = workerRef.current;
         if (worker) {
