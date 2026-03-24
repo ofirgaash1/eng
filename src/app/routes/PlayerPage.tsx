@@ -61,6 +61,18 @@ function ensureParsedSubtitleCues(cues: Cue[]): Cue[] {
   return cues;
 }
 
+function shiftCueList(cues: Cue[], offsetMs: number): Cue[] {
+  if (offsetMs === 0) {
+    return cues;
+  }
+
+  return cues.map((cue) => ({
+    ...cue,
+    startMs: cue.startMs + offsetMs,
+    endMs: cue.endMs + offsetMs,
+  }));
+}
+
 function openDefinitionSearch(word: string) {
   const query = word.trim();
   if (!query) return;
@@ -117,6 +129,7 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
   const [subtitleOffsetMs, setSubtitleOffsetMs] = useState<number>(0);
   const [subtitleTimingLockEnabled, setSubtitleTimingLockEnabled] = useState<boolean>(false);
   const [subtitleTimingLockBlend, setSubtitleTimingLockBlend] = useState<number>(0.5);
+  const [subtitleTimingLockPairOffsetMs, setSubtitleTimingLockPairOffsetMs] = useState<number>(0);
   const [subtitleError, setSubtitleError] = useState<string | null>(null);
   const [isSubtitleRtl, setIsSubtitleRtl] = useState<boolean>(false);
   const [secondarySubtitleName, setSecondarySubtitleName] = useState<string>("");
@@ -490,6 +503,9 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
       }
       if (typeof session.subtitleTimingLockBlend === "number") {
         setSubtitleTimingLockBlend(Math.min(1, Math.max(0, session.subtitleTimingLockBlend)));
+      }
+      if (typeof session.subtitleTimingLockPairOffsetMs === "number") {
+        setSubtitleTimingLockPairOffsetMs(session.subtitleTimingLockPairOffsetMs);
       }
       if (typeof session.videoTimeSeconds === "number") {
         setSavedVideoTime(session.videoTimeSeconds);
@@ -1194,8 +1210,15 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
       timingLockActive,
     ],
   );
-  const effectivePrimaryCues = timingLockResult.primaryCues;
-  const effectiveSecondaryCues = timingLockResult.secondaryCues;
+  const activeLockedPairOffsetMs = timingLockResult.active ? subtitleTimingLockPairOffsetMs : 0;
+  const effectivePrimaryCues = useMemo(
+    () => shiftCueList(timingLockResult.primaryCues, activeLockedPairOffsetMs),
+    [activeLockedPairOffsetMs, timingLockResult.primaryCues],
+  );
+  const effectiveSecondaryCues = useMemo(
+    () => shiftCueList(timingLockResult.secondaryCues, activeLockedPairOffsetMs),
+    [activeLockedPairOffsetMs, timingLockResult.secondaryCues],
+  );
 
   const activeCues = useMemo(
     () =>
@@ -1278,24 +1301,43 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
     }
   }, []);
 
+  const adjustLockedPairOffset = useCallback((deltaMs: number) => {
+    setSubtitleTimingLockPairOffsetMs((previous) => {
+      const next = previous + deltaMs;
+      void saveLastSession({ subtitleTimingLockPairOffsetMs: next });
+      return next;
+    });
+  }, []);
+
   const adjustSubtitleOffset = useCallback(
     (deltaMs: number) => {
+      if (timingLockActive) {
+        adjustLockedPairOffset(deltaMs);
+        return;
+      }
       setSubtitleOffsetMs((previous) => {
         const next = previous + deltaMs;
         void saveLastSession({ subtitleOffsetMs: next });
         return next;
       });
     },
-    [],
+    [adjustLockedPairOffset, timingLockActive],
   );
 
-  const adjustSecondarySubtitleOffset = useCallback((deltaMs: number) => {
-    setSecondarySubtitleOffsetMs((previous) => {
-      const next = previous + deltaMs;
-      void saveLastSession({ secondarySubtitleOffsetMs: next });
-      return next;
-    });
-  }, []);
+  const adjustSecondarySubtitleOffset = useCallback(
+    (deltaMs: number) => {
+      if (timingLockActive) {
+        adjustLockedPairOffset(deltaMs);
+        return;
+      }
+      setSecondarySubtitleOffsetMs((previous) => {
+        const next = previous + deltaMs;
+        void saveLastSession({ secondarySubtitleOffsetMs: next });
+        return next;
+      });
+    },
+    [adjustLockedPairOffset, timingLockActive],
+  );
 
   const handleSubtitleTimingLockToggle = useCallback(() => {
     if (!timingLockAvailable) return;
@@ -1782,7 +1824,7 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
                             {timingLockResult.active
                               ? `Auto shift ${timingLockResult.autoSecondaryShiftMs >= 0 ? "+" : ""}${(
                                   timingLockResult.autoSecondaryShiftMs / 1000
-                                ).toFixed(2)}s, aligned ${timingLockResult.matchedSectionCount} sections (${timingLockResult.matchedPrimaryGroupCount}/${timingLockResult.primaryGroupCount} primary groups, ${timingLockResult.matchedSecondaryGroupCount}/${timingLockResult.secondaryGroupCount} secondary groups)`
+                                ).toFixed(2)}s${activeLockedPairOffsetMs !== 0 ? `, pair offset ${activeLockedPairOffsetMs >= 0 ? "+" : ""}${(activeLockedPairOffsetMs / 1000).toFixed(2)}s` : ""}, aligned ${timingLockResult.matchedSectionCount} sections (${timingLockResult.matchedPrimaryGroupCount}/${timingLockResult.primaryGroupCount} primary groups, ${timingLockResult.matchedSecondaryGroupCount}/${timingLockResult.secondaryGroupCount} secondary groups)`
                               : !timingLockAvailable
                                 ? "Requires both subtitle files"
                                 : "Timing lock is off"}
@@ -1853,8 +1895,14 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
                             +0.5s
                           </button>
                           <span className="text-xs text-white/60">
-                            Offset: {subtitleOffsetMs >= 0 ? "+" : ""}
-                            {(subtitleOffsetMs / 1000).toFixed(1)}s
+                            {timingLockActive ? "Pair offset: " : "Offset: "}
+                            {(timingLockActive ? activeLockedPairOffsetMs : subtitleOffsetMs) >= 0
+                              ? "+"
+                              : ""}
+                            {(
+                              (timingLockActive ? activeLockedPairOffsetMs : subtitleOffsetMs) / 1000
+                            ).toFixed(1)}
+                            s
                           </span>
                         </div>
                       </td>
@@ -1912,8 +1960,22 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
                             +0.5s
                           </button>
                           <span className="text-xs text-white/60">
-                            Offset: {secondarySubtitleOffsetMs >= 0 ? "+" : ""}
-                            {(secondarySubtitleOffsetMs / 1000).toFixed(1)}s
+                            {timingLockActive ? "Pair offset: " : "Offset: "}
+                            {(
+                              timingLockActive
+                                ? activeLockedPairOffsetMs
+                                : secondarySubtitleOffsetMs
+                            ) >= 0
+                              ? "+"
+                              : ""}
+                            {(
+                              (
+                                timingLockActive
+                                  ? activeLockedPairOffsetMs
+                                  : secondarySubtitleOffsetMs
+                              ) / 1000
+                            ).toFixed(1)}
+                            s
                           </span>
                         </div>
                       </td>

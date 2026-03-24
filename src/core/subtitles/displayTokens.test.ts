@@ -75,4 +75,18 @@ describe("subtitle display tokens", () => {
       ["חתום", "ע\"י", "תלוניוס", "בעצמו."],
     ]);
   });
+
+  it("normalizes compensated trailing quotes and dialogue dashes in RTL lines", () => {
+    const rtlText = `99
+00:05:00,440 --> 00:05:03,480
+טקילה "קורבו"? -טקילה
+.רבולוסיון, סילבר", בלי ליים"`;
+    const [cue] = parseSrt(rtlText);
+    const lines = buildDisplayLines(cue.rawText).map((line) => line.map((token) => token.text));
+
+    expect(lines).toEqual([
+      ["טקילה", "\"קורבו\"?", "-טקילה"],
+      ["\"רבולוסיון,", "סילבר\",", "בלי", "ליים."],
+    ]);
+  });
 });

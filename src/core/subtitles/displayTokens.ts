@@ -15,6 +15,7 @@ export type DisplayToken = {
 
 const NO_SPACE_BEFORE_RE = /^[)"\]\}\u05F3\u05F4»”’.,!?;:%…،؛؟。！？]+$/u;
 const NO_SPACE_AFTER_RE = /^["(\[\{\u05F3\u05F4«“‘]+$/u;
+const DIALOGUE_DASH_RE = /^[-–—]+$/u;
 const RTL_TEXT_RE = /[\u0591-\u07FF\uFB1D-\uFDFD\uFE70-\uFEFC]/u;
 
 export function isWordLikeToken(token: Token): boolean {
@@ -29,11 +30,15 @@ function isNoSpaceAfter(token: Token): boolean {
   return !token.isWord && NO_SPACE_AFTER_RE.test(token.text);
 }
 
+function isDialogueDash(token: Token): boolean {
+  return !token.isWord && DIALOGUE_DASH_RE.test(token.text);
+}
+
 function lineContainsRtl(tokens: StyledToken[]): boolean {
   return tokens.some(({ token }) => RTL_TEXT_RE.test(token.text));
 }
 
-function moveCompensatedLeadingPunctuationToLineEnd(tokens: StyledToken[]): StyledToken[] {
+function normalizeCompensatedRtlPunctuation(tokens: StyledToken[]): StyledToken[] {
   if (!lineContainsRtl(tokens)) return tokens;
 
   let leadingCount = 0;
@@ -41,8 +46,20 @@ function moveCompensatedLeadingPunctuationToLineEnd(tokens: StyledToken[]): Styl
     leadingCount += 1;
   }
 
-  if (leadingCount === 0) return tokens;
-  return [...tokens.slice(leadingCount), ...tokens.slice(0, leadingCount)];
+  let trailingStart = tokens.length;
+  while (trailingStart > leadingCount && isNoSpaceAfter(tokens[trailingStart - 1].token)) {
+    trailingStart -= 1;
+  }
+
+  if (leadingCount === 0 && trailingStart === tokens.length) {
+    return tokens;
+  }
+
+  return [
+    ...tokens.slice(trailingStart),
+    ...tokens.slice(leadingCount, trailingStart),
+    ...tokens.slice(0, leadingCount),
+  ];
 }
 
 export function shouldAddSpaceBefore(prev: Token | undefined, next: Token): boolean {
@@ -102,9 +119,16 @@ export function buildDisplayTokens(tokens: StyledToken[]): DisplayToken[] {
   let prefixItalic = false;
 
   tokens.forEach((token, index) => {
+    const previous = index > 0 ? tokens[index - 1] : undefined;
     const next = tokens[index + 1];
 
-    if (!token.token.isWord && isNoSpaceAfter(token.token) && next && isWordLikeToken(next.token)) {
+    if (
+      !token.token.isWord &&
+      next &&
+      isWordLikeToken(next.token) &&
+      (isNoSpaceAfter(token.token) ||
+        (isDialogueDash(token.token) && (!previous || !isWordLikeToken(previous.token))))
+    ) {
       prefix += token.token.text;
       prefixItalic = prefixItalic || token.italic;
       return;
@@ -148,6 +172,6 @@ export function buildDisplayTokens(tokens: StyledToken[]): DisplayToken[] {
 
 export function buildDisplayLines(text: string): DisplayToken[][] {
   return tokenizeLinesWithItalics(text).map((line) =>
-    buildDisplayTokens(moveCompensatedLeadingPunctuationToLineEnd(line)),
+    buildDisplayTokens(normalizeCompensatedRtlPunctuation(line)),
   );
 }

@@ -11,6 +11,14 @@ const SAMPLE_CUE: Cue = {
   tokens: [],
 };
 
+const QUOTED_DASH_CUE: Cue = {
+  index: 99,
+  startMs: 300440,
+  endMs: 303480,
+  rawText: "טקילה \"קורבו\"? -טקילה\n.רבולוסיון, סילבר\", בלי ליים\"",
+  tokens: [],
+};
+
 describe("SubtitleOverlay", () => {
   it("renders one row per subtitle line with normalized RTL punctuation", () => {
     const html = renderToStaticMarkup(
@@ -28,5 +36,20 @@ describe("SubtitleOverlay", () => {
     expect(html).toContain("בעצמו.");
     expect(html).not.toContain("&quot;כולל");
     expect(html).not.toContain(".חתום");
+  });
+
+  it("renders compensated trailing quotes and dialogue dashes on the correct RTL tokens", () => {
+    const html = renderToStaticMarkup(
+      <SubtitleCueBackground cue={QUOTED_DASH_CUE} isRtl className="justify-center text-center" />,
+    );
+
+    expect(html).toContain("טקילה");
+    expect(html).toContain("&quot;קורבו&quot;?");
+    expect(html).toContain(">-טקילה<");
+    expect(html).toContain("&quot;רבולוסיון,");
+    expect(html).toContain("סילבר&quot;,");
+    expect(html).toContain("ליים.");
+    expect(html).not.toContain(".רבולוסיון");
+    expect(html).not.toContain("ליים&quot;");
   });
 });
