@@ -27,12 +27,33 @@ const SAMPLE_SRT = `1
 Hello?
 `;
 
+const COMPENSATED_RTL_SRT = `138
+00:06:10,950 --> 00:06:14,300
+"\u05db\u05d5\u05dc\u05dc \u05d4\u05ea\u05e7\u05dc\u05d9\u05d8 "\u05d4\u05d7\u05dc\u05d5\u05dd \u05e9\u05dc \u05de\u05d5\u05e0\u05e7
+.\u05d7\u05ea\u05d5\u05dd \u05e2"\u05d9 \u05ea\u05dc\u05d5\u05e0\u05d9\u05d5\u05e1 \u05d1\u05e2\u05e6\u05de\u05d5`;
+
+const TRAILING_QUOTES_RTL_SRT = `99
+00:05:00,440 --> 00:05:03,480
+\u05d8\u05e7\u05d9\u05dc\u05d4 "\u05e7\u05d5\u05e8\u05d1\u05d5"? -\u05d8\u05e7\u05d9\u05dc\u05d4
+.\u05e8\u05d1\u05d5\u05dc\u05d5\u05e1\u05d9\u05d5\u05df, \u05e1\u05d9\u05dc\u05d1\u05e8", \u05d1\u05dc\u05d9 \u05dc\u05d9\u05d9\u05dd"`;
+
+const MIXED_EDGE_QUOTES_RTL_SRT = `190
+00:11:28,250 --> 00:11:31,539
+\u05db\u05e8\u05d9\u05e1 \u05d1\u05d8\u05d5\u05d7 \u05e9\u05d4\u05d5\u05d0 \u05d4\u05e1\u05e4\u05d5\u05e8\u05d8\u05d0\u05d9
+,\u0027\u05d4\u05db\u05d9 \u05d2\u05e8\u05d5\u05e2 \u05d1\u05db\u05dc \u05e9\u05db\u05d1\u05ea \u05db\u05d9\u05ea\u05d5\u05ea \u05d7"`;
+
+const RTL_CURRENCY_AMOUNT_SRT = `347
+00:22:26,210 --> 00:22:30,070
+"\u05d0\u05ea\u05d4 \u05d7\u05d9\u05d9\u05d1 \u05dc"\u05de\u05e8\u05e7\u05d8 \u05e1\u05e7\u05d9\u05d5\u05e8\u05d9\u05d8\u05d9
+.$750,000`;
+
 describe("subtitle display tokens", () => {
   it("strips tags but preserves bracket cues and italics", () => {
     const cues = parseSrt(SAMPLE_SRT);
     const cleanedRaw = cues.map((cue) =>
       cue.rawText.replaceAll(ITALIC_START, "").replaceAll(ITALIC_END, ""),
     );
+
     expect(cleanedRaw).toEqual([
       "[person on speaker] Who are you?",
       "Who are you?",
@@ -63,30 +84,79 @@ describe("subtitle display tokens", () => {
   });
 
   it("keeps LTR-compensated RTL punctuation within the same subtitle line", () => {
-    const rtlText = `138
-00:06:10,950 --> 00:06:14,300
-"כולל התקליט "החלום של מונק
-.חתום ע"י תלוניוס בעצמו`;
-    const [cue] = parseSrt(rtlText);
+    const [cue] = parseSrt(COMPENSATED_RTL_SRT);
     const lines = buildDisplayLines(cue.rawText).map((line) => line.map((token) => token.text));
 
     expect(lines).toEqual([
-      ["כולל", "התקליט", "\"החלום", "של", "מונק\""],
-      ["חתום", "ע\"י", "תלוניוס", "בעצמו."],
+      [
+        "\u05db\u05d5\u05dc\u05dc",
+        "\u05d4\u05ea\u05e7\u05dc\u05d9\u05d8",
+        "\"\u05d4\u05d7\u05dc\u05d5\u05dd",
+        "\u05e9\u05dc",
+        "\u05de\u05d5\u05e0\u05e7\"",
+      ],
+      [
+        "\u05d7\u05ea\u05d5\u05dd",
+        "\u05e2\"\u05d9",
+        "\u05ea\u05dc\u05d5\u05e0\u05d9\u05d5\u05e1",
+        "\u05d1\u05e2\u05e6\u05de\u05d5.",
+      ],
     ]);
   });
 
   it("normalizes compensated trailing quotes and dialogue dashes in RTL lines", () => {
-    const rtlText = `99
-00:05:00,440 --> 00:05:03,480
-טקילה "קורבו"? -טקילה
-.רבולוסיון, סילבר", בלי ליים"`;
-    const [cue] = parseSrt(rtlText);
+    const [cue] = parseSrt(TRAILING_QUOTES_RTL_SRT);
     const lines = buildDisplayLines(cue.rawText).map((line) => line.map((token) => token.text));
 
     expect(lines).toEqual([
-      ["טקילה", "\"קורבו\"?", "-טקילה"],
-      ["\"רבולוסיון,", "סילבר\",", "בלי", "ליים."],
+      [
+        "\u05d8\u05e7\u05d9\u05dc\u05d4",
+        "\"\u05e7\u05d5\u05e8\u05d1\u05d5\"?",
+        "-\u05d8\u05e7\u05d9\u05dc\u05d4",
+      ],
+      [
+        "\"\u05e8\u05d1\u05d5\u05dc\u05d5\u05e1\u05d9\u05d5\u05df,",
+        "\u05e1\u05d9\u05dc\u05d1\u05e8\",",
+        "\u05d1\u05dc\u05d9",
+        "\u05dc\u05d9\u05d9\u05dd.",
+      ],
+    ]);
+  });
+
+  it("keeps mixed compensated quote clusters attached in RTL lines", () => {
+    const [cue] = parseSrt(MIXED_EDGE_QUOTES_RTL_SRT);
+    const lines = buildDisplayLines(cue.rawText).map((line) => line.map((token) => token.text));
+
+    expect(lines).toEqual([
+      [
+        "\u05db\u05e8\u05d9\u05e1",
+        "\u05d1\u05d8\u05d5\u05d7",
+        "\u05e9\u05d4\u05d5\u05d0",
+        "\u05d4\u05e1\u05e4\u05d5\u05e8\u05d8\u05d0\u05d9",
+      ],
+      [
+        "\"\u05d4\u05db\u05d9",
+        "\u05d2\u05e8\u05d5\u05e2",
+        "\u05d1\u05db\u05dc",
+        "\u05e9\u05db\u05d1\u05ea",
+        "\u05db\u05d9\u05ea\u05d5\u05ea",
+        "\u05d7,\u0027",
+      ],
+    ]);
+  });
+
+  it("keeps compensated currency amounts readable in RTL lines", () => {
+    const [cue] = parseSrt(RTL_CURRENCY_AMOUNT_SRT);
+    const lines = buildDisplayLines(cue.rawText).map((line) => line.map((token) => token.text));
+
+    expect(lines).toEqual([
+      [
+        "\u05d0\u05ea\u05d4",
+        "\u05d7\u05d9\u05d9\u05d1",
+        "\u05dc\"\u05de\u05e8\u05e7\u05d8",
+        "\u05e1\u05e7\u05d9\u05d5\u05e8\u05d9\u05d8\u05d9\"",
+      ],
+      ["$750,000."],
     ]);
   });
 });

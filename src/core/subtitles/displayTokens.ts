@@ -13,33 +13,65 @@ export type DisplayToken = {
   italic: boolean;
 };
 
-const NO_SPACE_BEFORE_RE = /^[)"\]\}\u05F3\u05F4»”’.,!?;:%…،؛؟。！？]+$/u;
-const NO_SPACE_AFTER_RE = /^["(\[\{\u05F3\u05F4«“‘]+$/u;
-const DIALOGUE_DASH_RE = /^[-–—]+$/u;
+const NO_SPACE_BEFORE_CHAR_RE =
+  /[)"'\]\}\u05F3\u05F4\u00BB\u201D\u2019\u02BC.,!?;:%\u2026\u060C\u061B\u061F\u3002\uFF01\uFF1F]/u;
+const NO_SPACE_AFTER_CHAR_RE =
+  /["'(\[\{\u05F3\u05F4\u00AB\u201C\u2018\u2019\u02BC]/u;
+const DIALOGUE_DASH_RE = /^[-\u2013\u2014]+$/u;
+const PREFIX_JOINER_CHAR_RE = /[$\u20AA\u20AC\u00A3\u00A5#+]/u;
 const RTL_TEXT_RE = /[\u0591-\u07FF\uFB1D-\uFDFD\uFE70-\uFEFC]/u;
+
+function tokenCharsMatch(text: string, matcher: RegExp): boolean {
+  return [...text].every((char) => matcher.test(char));
+}
 
 export function isWordLikeToken(token: Token): boolean {
   return token.isWord || /^\d+$/.test(token.text);
 }
 
 function isNoSpaceBefore(token: Token): boolean {
-  return !token.isWord && NO_SPACE_BEFORE_RE.test(token.text);
+  return !token.isWord && tokenCharsMatch(token.text, NO_SPACE_BEFORE_CHAR_RE);
 }
 
 function isNoSpaceAfter(token: Token): boolean {
-  return !token.isWord && NO_SPACE_AFTER_RE.test(token.text);
+  return !token.isWord && tokenCharsMatch(token.text, NO_SPACE_AFTER_CHAR_RE);
 }
 
 function isDialogueDash(token: Token): boolean {
   return !token.isWord && DIALOGUE_DASH_RE.test(token.text);
 }
 
+function isPrefixJoiner(token: Token): boolean {
+  return !token.isWord && tokenCharsMatch(token.text, PREFIX_JOINER_CHAR_RE);
+}
+
+function isNumericToken(token: Token): boolean {
+  return !token.isWord && /^\d+$/u.test(token.text);
+}
+
+function isNumericJoiner(token: Token): boolean {
+  return !token.isWord && /^[,.:/]$/u.test(token.text);
+}
+
 function lineContainsRtl(tokens: StyledToken[]): boolean {
   return tokens.some(({ token }) => RTL_TEXT_RE.test(token.text));
 }
 
-function normalizeCompensatedRtlPunctuation(tokens: StyledToken[]): StyledToken[] {
-  if (!lineContainsRtl(tokens)) return tokens;
+function splitDisplayPunctuationToken(token: Token): Token[] {
+  if (token.isWord || /^\d+$/u.test(token.text) || token.text.length <= 1) {
+    return [token];
+  }
+
+  return [...token.text].map((char) => ({
+    text: char,
+    normalized: char,
+    stem: char,
+    isWord: false,
+  }));
+}
+
+function normalizeCompensatedRtlPunctuation(tokens: StyledToken[], rtlContext: boolean): StyledToken[] {
+  if (!rtlContext && !lineContainsRtl(tokens)) return tokens;
 
   let leadingCount = 0;
   while (leadingCount < tokens.length && isNoSpaceBefore(tokens[leadingCount].token)) {
@@ -100,7 +132,7 @@ export function tokenizeLinesWithItalics(text: string): StyledToken[][] {
     const lineParts = part.split(/\r?\n/);
     lineParts.forEach((linePart, index) => {
       if (linePart.length > 0) {
-        const chunkTokens = tokenize(linePart);
+        const chunkTokens = tokenize(linePart).flatMap(splitDisplayPunctuationToken);
         lines[lines.length - 1].push(...chunkTokens.map((token) => ({ token, italic })));
       }
 
@@ -124,9 +156,8 @@ export function buildDisplayTokens(tokens: StyledToken[]): DisplayToken[] {
 
     if (
       !token.token.isWord &&
-      next &&
-      isWordLikeToken(next.token) &&
-      (isNoSpaceAfter(token.token) ||
+      (((isNoSpaceAfter(token.token) || isPrefixJoiner(token.token)) &&
+        (prefix.length > 0 || !previous || (next ? isWordLikeToken(next.token) : false))) ||
         (isDialogueDash(token.token) && (!previous || !isWordLikeToken(previous.token))))
     ) {
       prefix += token.token.text;
@@ -136,7 +167,27 @@ export function buildDisplayTokens(tokens: StyledToken[]): DisplayToken[] {
 
     if (!token.token.isWord && isNoSpaceBefore(token.token) && displayTokens.length > 0) {
       const lastToken = displayTokens[displayTokens.length - 1];
+      if (prefix.trim().length > 0) {
+        lastToken.text += prefix;
+        lastToken.italic = lastToken.italic || prefixItalic;
+        prefix = "";
+        prefixItalic = false;
+      }
       lastToken.text += token.token.text;
+      lastToken.italic = lastToken.italic || token.italic;
+      return;
+    }
+
+    if (
+      isNumericToken(token.token) &&
+      previous &&
+      isNumericJoiner(previous.token) &&
+      displayTokens.length > 0 &&
+      /\d[,.:/]?$/u.test(displayTokens[displayTokens.length - 1].text)
+    ) {
+      const lastToken = displayTokens[displayTokens.length - 1];
+      lastToken.text += token.token.text;
+      lastToken.token = token.token;
       lastToken.italic = lastToken.italic || token.italic;
       return;
     }
@@ -171,7 +222,8 @@ export function buildDisplayTokens(tokens: StyledToken[]): DisplayToken[] {
 }
 
 export function buildDisplayLines(text: string): DisplayToken[][] {
+  const rtlContext = RTL_TEXT_RE.test(text);
   return tokenizeLinesWithItalics(text).map((line) =>
-    buildDisplayTokens(normalizeCompensatedRtlPunctuation(line)),
+    buildDisplayTokens(normalizeCompensatedRtlPunctuation(line, rtlContext)),
   );
 }
