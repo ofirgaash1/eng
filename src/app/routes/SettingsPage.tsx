@@ -9,6 +9,7 @@ import {
 } from "../../services/usernameSync";
 import { useDictionaryStore } from "../../state/dictionaryStore";
 import { usePrefsStore } from "../../state/prefsStore";
+import { loadLastSyncUsername, saveLastSyncUsername } from "../../utils/syncUsernameStorage";
 
 type ImportProgressState = {
   percent: number;
@@ -37,7 +38,7 @@ export default function SettingsPage() {
   const [isMergingUsername, setIsMergingUsername] = useState(false);
   const [importProgress, setImportProgress] = useState<ImportProgressState | null>(null);
   const [importElapsed, setImportElapsed] = useState(0);
-  const [syncUsername, setSyncUsername] = useState("");
+  const [syncUsername, setSyncUsername] = useState(() => loadLastSyncUsername());
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -239,6 +240,7 @@ export default function SettingsPage() {
       setSyncStatus(`Creating username '${username}'...`);
       const result = await createUsernameProfile(username);
       setSyncUsername(result.username);
+      saveLastSyncUsername(result.username);
       setTransferSuccess(`Created username '${result.username}'.`);
     } catch (error) {
       setTransferError(error instanceof Error ? error.message : "Unable to create username.");
@@ -262,6 +264,7 @@ export default function SettingsPage() {
       setSyncStatus(`Uploading backup for '${username}'...`);
       const result = await publishBackupToUsername(username, payload);
       setSyncUsername(result.username);
+      saveLastSyncUsername(result.username);
       setTransferSuccess(
         `Published ${counts.words} word${counts.words === 1 ? "" : "s"} and ${counts.subtitleFiles} subtitle file${counts.subtitleFiles === 1 ? "" : "s"} to '${result.username}'.`,
       );
@@ -287,6 +290,7 @@ export default function SettingsPage() {
       const remote = await importBackupFromUsername(username);
       const summary = summarizeBackup(remote.payload);
       setSyncUsername(remote.username);
+      saveLastSyncUsername(remote.username);
       setImportProgress({
         percent: 20,
         stage: `Downloaded backup (${summary.words} words, ${summary.subtitleFiles} files)`,
@@ -327,6 +331,7 @@ export default function SettingsPage() {
       const remote = await importBackupFromUsername(username);
       const summary = summarizeBackup(remote.payload);
       setSyncUsername(remote.username);
+      saveLastSyncUsername(remote.username);
       setImportProgress({
         percent: 15,
         stage: `Downloaded backup (${summary.words} words, ${summary.subtitleFiles} files)`,
