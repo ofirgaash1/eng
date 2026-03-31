@@ -13,6 +13,7 @@ import { sha256Hex } from "../../utils/sha256";
 import {
   clearTrackedSyncDataChanges,
   loadLastSyncUsername,
+  loadUsernameSyncState,
   saveLastSyncUsername,
   saveUsernameSyncState,
 } from "../../utils/syncUsernameStorage";
@@ -31,6 +32,29 @@ function parseTimestamp(value: string | null | undefined): number | undefined {
   }
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function formatLastSaveAge(now: number, lastPublishedAt: number): string {
+  const elapsedMs = Math.max(0, now - lastPublishedAt);
+  const elapsedMinutes = Math.floor(elapsedMs / 60000);
+  if (elapsedMinutes < 1) {
+    return "just now";
+  }
+  if (elapsedMinutes === 1) {
+    return "1 min ago";
+  }
+  if (elapsedMinutes < 60) {
+    return `${elapsedMinutes} mins ago`;
+  }
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours === 1) {
+    return "1 hour ago";
+  }
+  if (elapsedHours < 24) {
+    return `${elapsedHours} hours ago`;
+  }
+  const elapsedDays = Math.floor(elapsedHours / 24);
+  return elapsedDays === 1 ? "1 day ago" : `${elapsedDays} days ago`;
 }
 
 export default function SettingsPage() {
@@ -54,6 +78,7 @@ export default function SettingsPage() {
   const [importElapsed, setImportElapsed] = useState(0);
   const [syncUsername, setSyncUsername] = useState(() => loadLastSyncUsername());
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
+  const [syncClock, setSyncClock] = useState(() => Date.now());
   const importInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -76,6 +101,15 @@ export default function SettingsPage() {
       window.clearInterval(interval);
     };
   }, [isImporting]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setSyncClock(Date.now());
+    }, 60000);
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, []);
 
   const handleNumberChange = (
     event: ChangeEvent<HTMLInputElement>,
@@ -403,6 +437,10 @@ export default function SettingsPage() {
   const usernameSyncConfigured = isUsernameSyncConfigured();
   const transferBusy =
     isExporting || isImporting || isCreatingUsername || isPublishingUsername || isMergingUsername;
+  const lastSyncState = loadUsernameSyncState(syncUsername);
+  const lastSaveLabel = lastSyncState
+    ? formatLastSaveAge(syncClock, lastSyncState.lastPublishedAt)
+    : "never";
 
   return (
     <div className="space-y-6">
@@ -677,6 +715,7 @@ export default function SettingsPage() {
               {isMergingUsername ? "Merging..." : "Import by username, then publish"}
             </button>
           </div>
+          <p className="text-xs text-white/60">Last save: {lastSaveLabel}</p>
           {syncStatus && <p className="text-sm text-white/60">{syncStatus}</p>}
         </div>
         {isImporting && importProgress ? (
