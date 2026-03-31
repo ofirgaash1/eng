@@ -12,6 +12,8 @@ export const OPEN_SUBTITLES_API_KEYS = Array.from(
   ]),
 );
 const OPEN_SUBTITLES_RATE_LIMIT_DELAY_MS = 1250;
+const OPEN_SUBTITLES_RELEASE_TAG_RE =
+  /\b(?:480p|576p|720p|1080p|2160p|blu(?:ray)?|web(?:rip|dl)?|x26[45]|h\.?26[45]|hevc|aac|ddp|dd5\.1|dvdrip|hdrip|brrip|proper|repack|remux|silence)\b/i;
 
 export type OpenSubtitlesFile = {
   file_id: number;
@@ -55,6 +57,67 @@ export function ensureSrtFileName(name: string | undefined, fallbackId: string) 
 export function buildPrefixedSubtitleFileName(prefix: string, videoName: string) {
   const baseName = videoName.trim().replace(/\.[^.\\/]+$/, "") || "subtitle";
   return `${prefix}.${baseName}.srt`;
+}
+
+function normalizeSearchQuery(query: string): string {
+  return query
+    .replace(/\.[^.\\/]+$/, "")
+    .replace(/[._]+/g, " ")
+    .replace(/\s*-\s*/g, " - ")
+    .replace(/\s+/g, " ")
+    .replace(/(?:^-\s*|\s*-\s*$)/g, "")
+    .trim();
+}
+
+function stripBracketedSegments(
+  query: string,
+  predicate: (segment: string) => boolean,
+): string {
+  return query.replace(/\s*[\(\[]([^\)\]]+)[\)\]]/g, (match, segment: string) =>
+    predicate(segment) ? " " : match,
+  );
+}
+
+function stripStandaloneYear(query: string): string {
+  return stripBracketedSegments(query, (segment) => /\b(?:19|20)\d{2}\b/.test(segment));
+}
+
+function stripReleaseMetadata(query: string): string {
+  return stripBracketedSegments(query, (segment) => OPEN_SUBTITLES_RELEASE_TAG_RE.test(segment));
+}
+
+export function buildOpenSubtitlesSearchQueries(videoName: string): string[] {
+  const queries: string[] = [];
+  const pushQuery = (value: string) => {
+    const normalized = normalizeSearchQuery(value);
+    if (!normalized) {
+      return;
+    }
+    if (!queries.includes(normalized)) {
+      queries.push(normalized);
+    }
+  };
+
+  const base = normalizeSearchQuery(videoName);
+  pushQuery(base);
+
+  const withoutYear = normalizeSearchQuery(stripStandaloneYear(base));
+  pushQuery(withoutYear);
+
+  const withoutYearOrRelease = normalizeSearchQuery(stripReleaseMetadata(withoutYear));
+  pushQuery(withoutYearOrRelease);
+
+  const episodeMatch = withoutYearOrRelease.match(/\bS\d{1,2}E\d{1,2}\b/i);
+  if (episodeMatch?.index !== undefined) {
+    const episode = episodeMatch[0].toUpperCase();
+    const title = normalizeSearchQuery(withoutYearOrRelease.slice(0, episodeMatch.index));
+    if (title) {
+      pushQuery(`${title} - ${episode}`);
+      pushQuery(`${title} ${episode}`);
+    }
+  }
+
+  return queries;
 }
 
 export function delay(ms: number) {

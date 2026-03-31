@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  buildOpenSubtitlesSearchQueries,
   buildPrefixedSubtitleFileName,
   ensureSrtFileName,
   pickMostDownloadedSubtitle,
@@ -19,6 +20,20 @@ describe("openSubtitles helpers", () => {
       "eng.Show.S01E01.srt",
     );
     expect(buildPrefixedSubtitleFileName("heb", "movie.mp4")).toBe("heb.movie.srt");
+  });
+
+  it("builds progressively simpler fallback search queries from noisy video names", () => {
+    expect(
+      buildOpenSubtitlesSearchQueries(
+        "Homeland (2011) - S02E05 - Q&A (1080p BluRay x265 Silence).mkv",
+      ),
+    ).toEqual([
+      "Homeland (2011) - S02E05 - Q&A (1080p BluRay x265 Silence)",
+      "Homeland - S02E05 - Q&A (1080p BluRay x265 Silence)",
+      "Homeland - S02E05 - Q&A",
+      "Homeland - S02E05",
+      "Homeland S02E05",
+    ]);
   });
 
   it("picks the searchable result with the highest download count", () => {

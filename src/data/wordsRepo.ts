@@ -1,5 +1,6 @@
 import type { UnknownWord } from "../core/types";
 import { db, withDb, withDbVoid } from "./db";
+import { markTrackedSyncDataChanged } from "../utils/syncUsernameStorage";
 
 export async function getAllWords(): Promise<UnknownWord[]> {
   return withDb([], () => db.words.toArray());
@@ -7,10 +8,12 @@ export async function getAllWords(): Promise<UnknownWord[]> {
 
 export async function saveWord(word: UnknownWord): Promise<void> {
   await withDbVoid(() => db.words.put(word));
+  markTrackedSyncDataChanged();
 }
 
 export async function deleteWord(id: string): Promise<void> {
   await withDbVoid(() => db.words.delete(id));
+  markTrackedSyncDataChanged();
 }
 
 export async function replaceAllWords(words: UnknownWord[]): Promise<void> {
@@ -22,4 +25,5 @@ export async function replaceAllWords(words: UnknownWord[]): Promise<void> {
       }
     })
   );
+  markTrackedSyncDataChanged();
 }

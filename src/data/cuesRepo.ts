@@ -1,6 +1,7 @@
 import type { Cue, SubtitleCueRecord } from "../core/types";
 import { db, withDb, withDbVoid } from "./db";
 import { indexCandidateWordsForFile } from "./candidateWordsRepo";
+import { markTrackedSyncDataChanged } from "../utils/syncUsernameStorage";
 
 function isValidCue(cue: Cue): boolean {
   return (
@@ -70,8 +71,10 @@ export async function saveCuesForFile(fileHash: string, cues: Cue[]): Promise<vo
     })
   );
   await indexCandidateWordsForFile(fileHash, validCues);
+  markTrackedSyncDataChanged();
 }
 
 export async function deleteCuesForFile(fileHash: string): Promise<void> {
   await withDbVoid(() => db.subtitleCues.where("fileHash").equals(fileHash).delete());
+  markTrackedSyncDataChanged();
 }

@@ -1,5 +1,5 @@
 import { ChangeEvent, useEffect, useRef, useState } from "react";
-import { exportAllData, importAllData, summarizeBackup } from "../../data/backupRepo";
+import { exportAllData, importAllData, serializeTrackedBackupData, summarizeBackup } from "../../data/backupRepo";
 import {
   createUsernameProfile,
   importBackupFromUsername,
@@ -9,7 +9,13 @@ import {
 } from "../../services/usernameSync";
 import { useDictionaryStore } from "../../state/dictionaryStore";
 import { usePrefsStore } from "../../state/prefsStore";
-import { loadLastSyncUsername, saveLastSyncUsername } from "../../utils/syncUsernameStorage";
+import { sha256Hex } from "../../utils/sha256";
+import {
+  clearTrackedSyncDataChanges,
+  loadLastSyncUsername,
+  saveLastSyncUsername,
+  saveUsernameSyncState,
+} from "../../utils/syncUsernameStorage";
 
 type ImportProgressState = {
   percent: number;
@@ -18,6 +24,14 @@ type ImportProgressState = {
   fileIndex?: number;
   totalFiles?: number;
 };
+
+function parseTimestamp(value: string | null | undefined): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
 
 export default function SettingsPage() {
   const subtitleStyle = usePrefsStore((state) => state.prefs.subtitleStyle);
@@ -261,10 +275,16 @@ export default function SettingsPage() {
       const { payload, counts } = await exportAllData({
         includeCueTokens: false,
       });
+      const trackedHash = await sha256Hex(serializeTrackedBackupData(payload));
       setSyncStatus(`Uploading backup for '${username}'...`);
       const result = await publishBackupToUsername(username, payload);
       setSyncUsername(result.username);
       saveLastSyncUsername(result.username);
+      saveUsernameSyncState(result.username, {
+        lastPublishedAt: parseTimestamp(result.exportedAt) ?? Date.now(),
+        lastPublishedTrackedHash: trackedHash,
+      });
+      clearTrackedSyncDataChanges();
       setTransferSuccess(
         `Published ${counts.words} word${counts.words === 1 ? "" : "s"} and ${counts.subtitleFiles} subtitle file${counts.subtitleFiles === 1 ? "" : "s"} to '${result.username}'.`,
       );
@@ -353,12 +373,18 @@ export default function SettingsPage() {
       const { payload, counts: exportCounts } = await exportAllData({
         includeCueTokens: false,
       });
+      const trackedHash = await sha256Hex(serializeTrackedBackupData(payload));
       setSyncStatus(`Publishing merged backup for '${remote.username}'...`);
       setImportProgress({
         percent: 90,
         stage: `Publishing merged backup for '${remote.username}'`,
       });
-      await publishBackupToUsername(remote.username, payload);
+      const publishResult = await publishBackupToUsername(remote.username, payload);
+      saveUsernameSyncState(remote.username, {
+        lastPublishedAt: parseTimestamp(publishResult.exportedAt) ?? Date.now(),
+        lastPublishedTrackedHash: trackedHash,
+      });
+      clearTrackedSyncDataChanges();
       setTransferSuccess(
         `Merged remote backup from '${remote.username}' into local data, then replaced the remote snapshot with the merged result. Added ${importCounts.addedWords} word${importCounts.addedWords === 1 ? "" : "s"} and ${importCounts.addedSubtitleFiles} subtitle file${importCounts.addedSubtitleFiles === 1 ? "" : "s"}. Current totals: ${exportCounts.words} word${exportCounts.words === 1 ? "" : "s"} and ${exportCounts.subtitleFiles} subtitle file${exportCounts.subtitleFiles === 1 ? "" : "s"}.`,
       );
@@ -607,6 +633,9 @@ export default function SettingsPage() {
             </p>
             <p className="text-xs text-white/60">
               Publish replaces the remote backup snapshot for that username. Import merges the remote backup into your current local data.
+            </p>
+            <p className="text-xs text-white/60">
+              After a successful publish, tracked word and subtitle changes will autosave with the same import-then-publish flow once at least 30 minutes have passed since the last username save.
             </p>
             {!usernameSyncConfigured && (
               <p className="text-xs text-amber-300">

@@ -7,6 +7,7 @@ import SettingsPage from "./routes/SettingsPage";
 import StatsPage from "./routes/StatsPage";
 import VlsubPage from "./routes/VlsubPage";
 import HelpPage from "./routes/HelpPage";
+import UsernameSyncAutosave from "./UsernameSyncAutosave";
 import { usePrefsStore } from "../state/prefsStore";
 import { dismissDbError, subscribeDbErrors, type DbErrorEvent } from "../data/dbErrorReporter";
 
@@ -147,6 +148,7 @@ export default function App() {
         </footer>
       </div>
       <DbErrorToasts />
+      <UsernameSyncAutosave />
     </div>
   );
 }

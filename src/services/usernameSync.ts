@@ -177,6 +177,7 @@ export async function publishBackupToUsername(
 export async function importBackupFromUsername(rawUsername: string): Promise<{
   username: string;
   payload: unknown;
+  metadata: Pick<UsernameSyncMetadata, "exportedAt" | "contentEncoding" | "sizeBytes">;
 }> {
   const username = normalizeSyncUsername(rawUsername);
   const response = await fetchSync(buildSyncUrl(`/usernames/${encodeURIComponent(username)}/backup`), {
@@ -188,8 +189,18 @@ export async function importBackupFromUsername(rawUsername: string): Promise<{
   }
 
   const text = await readBackupText(response);
+  const sizeBytesHeader = response.headers.get("content-length");
+  const sizeBytes = sizeBytesHeader ? Number.parseInt(sizeBytesHeader, 10) : undefined;
   return {
     username,
     payload: JSON.parse(text),
+    metadata: {
+      exportedAt: response.headers.get("x-backup-exported-at"),
+      contentEncoding:
+        response.headers.get("x-backup-content-encoding")?.toLowerCase() ??
+        response.headers.get("content-encoding")?.toLowerCase() ??
+        null,
+      sizeBytes: Number.isFinite(sizeBytes) ? sizeBytes : undefined,
+    },
   };
 }

@@ -8,6 +8,7 @@ import type {
 } from "../core/types";
 import { tokenize } from "../core/nlp/tokenize";
 import { db, ensureDbReady, withDb, withDbVoid } from "./db";
+import { markTrackedSyncDataChanged } from "../utils/syncUsernameStorage";
 
 const PREFS_ID = "prefs";
 
@@ -52,6 +53,34 @@ type ImportOptions = {
 
 export type ExportOptions = {
   includeCueTokens?: boolean;
+};
+
+type TrackedBackupSnapshot = {
+  words: Array<{
+    id: string;
+    original: string;
+    originalSentence: string | null;
+    normalized: string;
+    stem: string;
+    createdAt: number;
+    updatedAt: number;
+  }>;
+  subtitleFiles: Array<{
+    id: string;
+    name: string;
+    bytesHash: string;
+    totalCues: number;
+    language: string | null;
+    addedAt: number;
+  }>;
+  subtitleCues: Array<{
+    id: string;
+    fileHash: string;
+    index: number;
+    startMs: number;
+    endMs: number;
+    rawText: string;
+  }>;
 };
 
 function stripPrefsForTransfer(prefs: UserPrefs): UserPrefs {
@@ -214,6 +243,57 @@ function buildBackupSummary(
   };
 }
 
+function buildTrackedBackupSnapshot(input: unknown): TrackedBackupSnapshot {
+  const data = extractBackupData(input);
+  const words = ensureArray<UnknownWord>(data.words);
+  const { subtitleFiles, subtitleCues } = sanitizeSubtitleTransferData(
+    ensureArray<SubtitleFile>(data.subtitleFiles),
+    ensureArray<SubtitleCueRecord>(data.subtitleCues)
+  );
+
+  return {
+    words: words
+      .map((word) => ({
+        id: word.id,
+        original: word.original,
+        originalSentence: word.originalSentence ?? null,
+        normalized: word.normalized,
+        stem: word.stem,
+        createdAt: word.createdAt,
+        updatedAt: word.updatedAt,
+      }))
+      .sort(
+        (a, b) =>
+          a.normalized.localeCompare(b.normalized) ||
+          a.stem.localeCompare(b.stem) ||
+          a.id.localeCompare(b.id)
+      ),
+    subtitleFiles: subtitleFiles
+      .map((file) => ({
+        id: file.id,
+        name: file.name,
+        bytesHash: file.bytesHash,
+        totalCues: sanitizeCueCount(file.totalCues),
+        language: file.language ?? null,
+        addedAt: file.addedAt,
+      }))
+      .sort((a, b) => a.bytesHash.localeCompare(b.bytesHash) || a.id.localeCompare(b.id)),
+    subtitleCues: subtitleCues
+      .map((cue) => ({
+        id: cue.id,
+        fileHash: cue.fileHash,
+        index: cue.index,
+        startMs: cue.startMs,
+        endMs: cue.endMs,
+        rawText: cue.rawText,
+      }))
+      .sort(
+        (a, b) =>
+          a.fileHash.localeCompare(b.fileHash) || a.index - b.index || a.id.localeCompare(b.id)
+      ),
+  };
+}
+
 export function summarizeBackup(input: unknown): BackupSummary {
   const data = extractBackupData(input);
   const words = ensureArray<UnknownWord>(data.words);
@@ -227,6 +307,10 @@ export function summarizeBackup(input: unknown): BackupSummary {
       : undefined;
   const sessions = ensureArray<RecentSessionRecord>(data.sessions).map(stripSessionForTransfer);
   return buildBackupSummary(words, subtitleFiles, subtitleCues, sessions, prefs);
+}
+
+export function serializeTrackedBackupData(input: unknown): string {
+  return JSON.stringify(buildTrackedBackupSnapshot(input));
 }
 
 function pickString(primary: string | undefined, fallback: string | undefined) {
@@ -553,6 +637,10 @@ export async function importAllData(
     throw new Error(
       "Import did not write any data. Check browser storage permissions and retry."
     );
+  }
+
+  if (sourceSummary.words > 0 || sourceSummary.subtitleFiles > 0 || sourceSummary.subtitleCues > 0) {
+    markTrackedSyncDataChanged();
   }
 
   return {

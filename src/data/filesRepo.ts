@@ -3,6 +3,7 @@ import type { SubtitleFile } from "../core/types";
 import { db, withDb, withDbVoid } from "./db";
 import { deleteCuesForFile } from "./cuesRepo";
 import { deleteCandidateWordsForFile } from "./candidateWordsRepo";
+import { markTrackedSyncDataChanged } from "../utils/syncUsernameStorage";
 
 export async function upsertSubtitleFile(
   input: Omit<SubtitleFile, "id" | "addedAt"> & { addedAt?: number }
@@ -22,6 +23,7 @@ export async function upsertSubtitleFile(
       };
 
   await withDbVoid(() => db.subtitleFiles.put(record));
+  markTrackedSyncDataChanged();
   return record;
 }
 
@@ -42,4 +44,5 @@ export async function deleteSubtitleFile(id: string): Promise<void> {
       await deleteCandidateWordsForFile(record.bytesHash);
     })
   );
+  markTrackedSyncDataChanged();
 }

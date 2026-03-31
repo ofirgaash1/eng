@@ -23,6 +23,7 @@ import { getLastSession, saveLastSession } from "../../data/sessionRepo";
 import { parseSrt } from "../../core/parsing/srtParser";
 import { buildTimingLockedCues } from "../../core/subtitles/timingLock";
 import {
+  buildOpenSubtitlesSearchQueries,
   buildPrefixedSubtitleFileName,
   delay,
   downloadOpenSubtitlesSubtitle,
@@ -991,17 +992,27 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
 
   const downloadBestSubtitleForLanguage = useCallback(async (language: string) => {
     const apiKeys = getQuickSubtitleApiKeys(language);
+    const searchQueries = buildOpenSubtitlesSearchQueries(videoName);
     const searchResult = await withOpenSubtitlesApiKeyFallback(
       apiKeys,
       async (apiKey) => {
-        const payload = await searchOpenSubtitlesSubtitles({
-          apiKey,
-          query: videoName,
-          language,
-        });
+        for (const query of searchQueries) {
+          const payload = await searchOpenSubtitlesSubtitles({
+            apiKey,
+            query,
+            language,
+          });
+          const item = pickMostDownloadedSubtitle(payload.items);
+          if (item) {
+            return {
+              apiKey,
+              item,
+            };
+          }
+        }
         return {
           apiKey,
-          item: pickMostDownloadedSubtitle(payload.items),
+          item: null,
         };
       },
     );
