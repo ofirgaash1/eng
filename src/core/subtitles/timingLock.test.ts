@@ -87,18 +87,33 @@ describe("subtitle timing lock", () => {
     expect(towardPrimary.primaryCues[1].startMs).toBe(4000);
     expect(towardPrimary.secondaryCues[1].startMs).toBe(4000);
 
-    expect(towardSecondary.primaryCues[0].startMs).toBe(
-      secondaryCues[0].startMs + towardSecondary.autoSecondaryShiftMs,
-    );
-    expect(towardSecondary.secondaryCues[0].startMs).toBe(
-      secondaryCues[0].startMs + towardSecondary.autoSecondaryShiftMs,
-    );
-    expect(towardSecondary.primaryCues[1].startMs).toBe(
-      secondaryCues[1].startMs + towardSecondary.autoSecondaryShiftMs,
-    );
-    expect(towardSecondary.secondaryCues[1].startMs).toBe(
-      secondaryCues[1].startMs + towardSecondary.autoSecondaryShiftMs,
-    );
+    expect(towardSecondary.referenceTrack).toBe("secondary");
+    expect(towardSecondary.primaryCues[0].startMs).toBe(secondaryCues[0].startMs);
+    expect(towardSecondary.secondaryCues[0].startMs).toBe(secondaryCues[0].startMs);
+    expect(towardSecondary.primaryCues[1].startMs).toBe(secondaryCues[1].startMs);
+    expect(towardSecondary.secondaryCues[1].startMs).toBe(secondaryCues[1].startMs);
+  });
+
+  it("keeps subtitle 2 on its original timeline even when auto shift is large", () => {
+    const primaryCues: Cue[] = [cue(1, 132000, 132600, "a"), cue(2, 135000, 135700, "b")];
+    const secondaryCues: Cue[] = [cue(1, 5000, 5600, "x"), cue(2, 8000, 8700, "y")];
+
+    const result = buildTimingLockedCues({
+      primaryCues,
+      secondaryCues,
+      primaryOffsetMs: 0,
+      secondaryOffsetMs: 0,
+      blend: 1,
+      enabled: true,
+      groupGapMs: 180,
+    });
+
+    expect(result.autoSecondaryShiftMs).toBe(127000);
+    expect(result.referenceTrack).toBe("secondary");
+    expect(result.secondaryCues[0].startMs).toBe(5000);
+    expect(result.secondaryCues[1].startMs).toBe(8000);
+    expect(result.primaryCues[0].startMs).toBe(5000);
+    expect(result.primaryCues[1].startMs).toBe(8000);
   });
 
   it("interpolates local drift for unmatched groups between matched anchors", () => {

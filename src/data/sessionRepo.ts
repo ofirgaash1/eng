@@ -28,6 +28,7 @@ export async function saveLastSession(
     subtitleHash: updates.subtitleHash,
     subtitleOffsetMs: updates.subtitleOffsetMs,
     subtitleTimingLockEnabled: updates.subtitleTimingLockEnabled,
+    subtitleTimingLockMode: updates.subtitleTimingLockMode,
     subtitleTimingLockBlend: updates.subtitleTimingLockBlend,
     subtitleTimingLockPairOffsetMs: updates.subtitleTimingLockPairOffsetMs,
     videoTimeSeconds: updates.videoTimeSeconds,

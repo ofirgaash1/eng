@@ -12,6 +12,7 @@ import { usePrefsStore } from "../../state/prefsStore";
 import { sha256Hex } from "../../utils/sha256";
 import {
   clearTrackedSyncDataChanges,
+  hasTrackedSyncDataChanges,
   loadLastSyncUsername,
   loadUsernameSyncState,
   saveLastSyncUsername,
@@ -24,6 +25,13 @@ type ImportProgressState = {
   fileName?: string;
   fileIndex?: number;
   totalFiles?: number;
+};
+
+type SyncCauseTone = "neutral" | "success" | "warning" | "error";
+
+type SyncCauseState = {
+  message: string;
+  tone: SyncCauseTone;
 };
 
 function parseTimestamp(value: string | null | undefined): number | undefined {
@@ -57,6 +65,35 @@ function formatLastSaveAge(now: number, lastPublishedAt: number): string {
   return elapsedDays === 1 ? "1 day ago" : `${elapsedDays} days ago`;
 }
 
+function formatMinutesRemaining(ms: number): string {
+  const minutes = Math.max(1, Math.ceil(ms / 60000));
+  return minutes === 1 ? "1 min" : `${minutes} mins`;
+}
+
+function toneClassName(tone: SyncCauseTone): string {
+  switch (tone) {
+    case "success":
+      return "text-emerald-300";
+    case "warning":
+      return "text-amber-300";
+    case "error":
+      return "text-red-400";
+    default:
+      return "text-white/60";
+  }
+}
+
+async function hashTrackedPayload(payload: unknown): Promise<string> {
+  return sha256Hex(serializeTrackedBackupData(payload));
+}
+
+function resolveLastPublishedAt(
+  remoteExportedAt: string | null | undefined,
+  fallback?: number,
+): number {
+  return parseTimestamp(remoteExportedAt) ?? fallback ?? Date.now();
+}
+
 export default function SettingsPage() {
   const subtitleStyle = usePrefsStore((state) => state.prefs.subtitleStyle);
   const highlightColors = usePrefsStore((state) => state.prefs.highlightColors);
@@ -79,7 +116,14 @@ export default function SettingsPage() {
   const [syncUsername, setSyncUsername] = useState(() => loadLastSyncUsername());
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
   const [syncClock, setSyncClock] = useState(() => Date.now());
+  const [syncCause, setSyncCause] = useState<SyncCauseState>({
+    message: "Enter a username to check backup status.",
+    tone: "neutral",
+  });
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const usernameSyncConfigured = isUsernameSyncConfigured();
+  const transferBusy =
+    isExporting || isImporting || isCreatingUsername || isPublishingUsername || isMergingUsername;
 
   useEffect(() => {
     if (!initialized) {
@@ -110,6 +154,117 @@ export default function SettingsPage() {
       window.clearInterval(interval);
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const checkSyncCause = async () => {
+      if (!usernameSyncConfigured) {
+        setSyncCause({
+          message: "Username sync is not configured.",
+          tone: "neutral",
+        });
+        return;
+      }
+
+      const rawUsername = syncUsername.trim();
+      if (!rawUsername) {
+        setSyncCause({
+          message: "Enter a username to check backup status.",
+          tone: "neutral",
+        });
+        return;
+      }
+
+      let username: string;
+      try {
+        username = normalizeSyncUsername(rawUsername);
+      } catch (error) {
+        setSyncCause({
+          message: error instanceof Error ? error.message : "Enter a valid username.",
+          tone: "warning",
+        });
+        return;
+      }
+
+      if (transferBusy) {
+        setSyncCause({
+          message: syncStatus ?? "Sync in progress...",
+          tone: "neutral",
+        });
+        return;
+      }
+
+      setSyncCause({
+        message: "Checking backup status...",
+        tone: "neutral",
+      });
+
+      try {
+        const syncState = loadUsernameSyncState(username);
+        const hasPendingLocalChanges = hasTrackedSyncDataChanges();
+        const { payload: localPayload } = await exportAllData({
+          includeCueTokens: false,
+        });
+        const localHash = await hashTrackedPayload(localPayload);
+        const remote = await importBackupFromUsername(username);
+        const remoteHash = await hashTrackedPayload(remote.payload);
+        const remotePublishedAt = resolveLastPublishedAt(
+          remote.metadata.exportedAt,
+          syncState?.lastPublishedAt,
+        );
+        const effectiveSyncState = {
+          lastPublishedAt: remotePublishedAt,
+          lastPublishedTrackedHash: remoteHash,
+        };
+
+        if (cancelled) {
+          return;
+        }
+
+        saveUsernameSyncState(username, effectiveSyncState);
+
+        if (remoteHash === localHash) {
+          setSyncCause({
+            message: "Everything is backed up.",
+            tone: "success",
+          });
+          return;
+        }
+
+        const remainingAutosaveMs = effectiveSyncState.lastPublishedAt + 30 * 60_000 - Date.now();
+        if (hasPendingLocalChanges) {
+          setSyncCause({
+            message:
+              remainingAutosaveMs > 0
+                ? `Local words or subtitles changed after the last save. Autosave becomes eligible in ${formatMinutesRemaining(remainingAutosaveMs)}.`
+                : "Local words or subtitles changed after the last save. Autosave should retry soon.",
+            tone: "warning",
+          });
+          return;
+        }
+
+        setSyncCause({
+          message: "Remote backup differs from the current local words or subtitles.",
+          tone: "warning",
+        });
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        setSyncCause({
+          message: error instanceof Error ? `Error: ${error.message}` : "Error: Unable to check backup status.",
+          tone: "error",
+        });
+      }
+    };
+
+    void checkSyncCause();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [syncUsername, syncClock, syncStatus, transferBusy, usernameSyncConfigured]);
 
   const handleNumberChange = (
     event: ChangeEvent<HTMLInputElement>,
@@ -434,9 +589,6 @@ export default function SettingsPage() {
     }
   };
 
-  const usernameSyncConfigured = isUsernameSyncConfigured();
-  const transferBusy =
-    isExporting || isImporting || isCreatingUsername || isPublishingUsername || isMergingUsername;
   const lastSyncState = loadUsernameSyncState(syncUsername);
   const lastSaveLabel = lastSyncState
     ? formatLastSaveAge(syncClock, lastSyncState.lastPublishedAt)
@@ -716,6 +868,7 @@ export default function SettingsPage() {
             </button>
           </div>
           <p className="text-xs text-white/60">Last save: {lastSaveLabel}</p>
+          <p className={`text-xs ${toneClassName(syncCause.tone)}`}>{syncCause.message}</p>
           {syncStatus && <p className="text-sm text-white/60">{syncStatus}</p>}
         </div>
         {isImporting && importProgress ? (

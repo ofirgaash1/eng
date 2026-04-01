@@ -20,6 +20,18 @@ export type TimingLockResult = {
   matchedSecondaryGroupCount: number;
   primaryGroupCount: number;
   secondaryGroupCount: number;
+  referenceTrack: "primary" | "blend" | "secondary";
+  active: boolean;
+};
+
+type PreparedTimingLock = {
+  primaryAdjustedCues: Cue[];
+  secondaryAdjustedCues: Cue[];
+  secondaryShiftedCues: Cue[];
+  autoSecondaryShiftMs: number;
+  matchedSpans: SpanMatch[];
+  primaryGroups: CueGroup[];
+  secondaryGroups: CueGroup[];
   active: boolean;
 };
 
@@ -610,22 +622,51 @@ function applyAnchorInterpolationToUnmatchedGroups(
   }
 }
 
-export function buildTimingLockedCues(options: TimingLockOptions): TimingLockResult {
-  const blend = clamp(options.blend, 0, 1);
+function buildInactiveTimingLockResult(
+  primaryCues: Cue[],
+  secondaryCues: Cue[],
+  referenceTrack: TimingLockResult["referenceTrack"],
+): TimingLockResult {
+  return {
+    primaryCues,
+    secondaryCues,
+    autoSecondaryShiftMs: 0,
+    matchedGroupCount: 0,
+    matchedSectionCount: 0,
+    matchedPrimaryGroupCount: 0,
+    matchedSecondaryGroupCount: 0,
+    primaryGroupCount: 0,
+    secondaryGroupCount: 0,
+    referenceTrack,
+    active: false,
+  };
+}
+
+function resolveReferenceTrack(blend: number): TimingLockResult["referenceTrack"] {
+  if (blend <= 0) {
+    return "primary";
+  }
+  if (blend >= 1) {
+    return "secondary";
+  }
+  return "blend";
+}
+
+export function prepareTimingLock(
+  options: Omit<TimingLockOptions, "blend">,
+): PreparedTimingLock {
   const primaryAdjustedCues = shiftCues(options.primaryCues, options.primaryOffsetMs);
   const secondaryAdjustedCues = shiftCues(options.secondaryCues, options.secondaryOffsetMs);
 
   if (!options.enabled || primaryAdjustedCues.length === 0 || secondaryAdjustedCues.length === 0) {
     return {
-      primaryCues: primaryAdjustedCues,
-      secondaryCues: secondaryAdjustedCues,
+      primaryAdjustedCues,
+      secondaryAdjustedCues,
+      secondaryShiftedCues: secondaryAdjustedCues.map((cue) => ({ ...cue })),
       autoSecondaryShiftMs: 0,
-      matchedGroupCount: 0,
-      matchedSectionCount: 0,
-      matchedPrimaryGroupCount: 0,
-      matchedSecondaryGroupCount: 0,
-      primaryGroupCount: 0,
-      secondaryGroupCount: 0,
+      matchedSpans: [],
+      primaryGroups: [],
+      secondaryGroups: [],
       active: false,
     };
   }
@@ -638,50 +679,93 @@ export function buildTimingLockedCues(options: TimingLockOptions): TimingLockRes
   const secondaryGroups = buildCueGroups(secondaryShiftedCues, groupGapMs);
   const matchedSpans = alignGroups(primaryGroups, secondaryGroups);
 
-  const primaryOutputCues = primaryAdjustedCues.map((cue) => ({ ...cue }));
-  const secondaryOutputCues = secondaryShiftedCues.map((cue) => ({ ...cue }));
+  return {
+    primaryAdjustedCues,
+    secondaryAdjustedCues,
+    secondaryShiftedCues,
+    autoSecondaryShiftMs,
+    matchedSpans,
+    primaryGroups,
+    secondaryGroups,
+    active: true,
+  };
+}
+
+export function buildTimingLockedCuesFromPrepared(
+  prepared: PreparedTimingLock,
+  blend: number,
+): TimingLockResult {
+  const clampedBlend = clamp(blend, 0, 1);
+  const referenceTrack = resolveReferenceTrack(clampedBlend);
+
+  if (!prepared.active) {
+    return buildInactiveTimingLockResult(
+      prepared.primaryAdjustedCues,
+      prepared.secondaryAdjustedCues,
+      referenceTrack,
+    );
+  }
+
+  const primaryOutputCues = prepared.primaryAdjustedCues.map((cue) => ({ ...cue }));
+  const secondaryOutputCues =
+    referenceTrack === "secondary"
+      ? prepared.secondaryAdjustedCues.map((cue) => ({ ...cue }))
+      : prepared.secondaryShiftedCues.map((cue) => ({ ...cue }));
   const primaryMatchedGroups = new Set<number>();
   const secondaryMatchedGroups = new Set<number>();
   const primaryAnchors: AnchorPoint[] = [];
   const secondaryAnchors: AnchorPoint[] = [];
 
-  for (const match of matchedSpans) {
-    const unifiedStartMs = Math.round(
-      lerp(match.primarySpan.startMs, match.secondarySpan.startMs, blend),
-    );
-    const unifiedEndMs = Math.round(
-      lerp(match.primarySpan.endMs, match.secondarySpan.endMs, blend),
-    );
+  for (const match of prepared.matchedSpans) {
+    let unifiedStartMs: number;
+    let unifiedEndMs: number;
+    if (referenceTrack === "primary") {
+      unifiedStartMs = match.primarySpan.startMs;
+      unifiedEndMs = match.primarySpan.endMs;
+    } else if (referenceTrack === "secondary") {
+      unifiedStartMs = match.secondarySpan.startMs - prepared.autoSecondaryShiftMs;
+      unifiedEndMs = match.secondarySpan.endMs - prepared.autoSecondaryShiftMs;
+    } else {
+      unifiedStartMs = Math.round(
+        lerp(match.primarySpan.startMs, match.secondarySpan.startMs, clampedBlend),
+      );
+      unifiedEndMs = Math.round(
+        lerp(match.primarySpan.endMs, match.secondarySpan.endMs, clampedBlend),
+      );
+    }
 
-    remapSpanCues(
-      primaryOutputCues,
-      primaryAdjustedCues,
-      match.primarySpan,
-      unifiedStartMs,
-      unifiedEndMs,
-    );
-    remapSpanCues(
-      secondaryOutputCues,
-      secondaryShiftedCues,
-      match.secondarySpan,
-      unifiedStartMs,
-      unifiedEndMs,
-    );
-
-    addAnchorPoints(
-      primaryAnchors,
-      match.primarySpan.startMs,
-      match.primarySpan.endMs,
-      unifiedStartMs,
-      unifiedEndMs,
-    );
-    addAnchorPoints(
-      secondaryAnchors,
-      match.secondarySpan.startMs,
-      match.secondarySpan.endMs,
-      unifiedStartMs,
-      unifiedEndMs,
-    );
+    if (referenceTrack !== "primary") {
+      remapSpanCues(
+        primaryOutputCues,
+        prepared.primaryAdjustedCues,
+        match.primarySpan,
+        unifiedStartMs,
+        unifiedEndMs,
+      );
+      addAnchorPoints(
+        primaryAnchors,
+        match.primarySpan.startMs,
+        match.primarySpan.endMs,
+        unifiedStartMs,
+        unifiedEndMs,
+      );
+    }
+    if (referenceTrack !== "secondary") {
+      remapSpanCues(
+        secondaryOutputCues,
+        prepared.secondaryShiftedCues,
+        match.secondarySpan,
+        unifiedStartMs,
+        unifiedEndMs,
+      );
+      addAnchorPoints(
+        secondaryAnchors,
+        match.secondarySpan.startMs,
+        match.secondarySpan.endMs,
+        unifiedStartMs,
+        unifiedEndMs,
+      );
+    }
 
     for (
       let primaryIndex = match.primarySpan.groupStartIndex;
@@ -699,31 +783,48 @@ export function buildTimingLockedCues(options: TimingLockOptions): TimingLockRes
     }
   }
 
-  applyAnchorInterpolationToUnmatchedGroups(
-    primaryOutputCues,
-    primaryAdjustedCues,
-    primaryGroups,
-    primaryMatchedGroups,
-    normalizeAnchors(primaryAnchors),
-  );
-  applyAnchorInterpolationToUnmatchedGroups(
-    secondaryOutputCues,
-    secondaryShiftedCues,
-    secondaryGroups,
-    secondaryMatchedGroups,
-    normalizeAnchors(secondaryAnchors),
-  );
+  if (referenceTrack !== "primary") {
+    applyAnchorInterpolationToUnmatchedGroups(
+      primaryOutputCues,
+      prepared.primaryAdjustedCues,
+      prepared.primaryGroups,
+      primaryMatchedGroups,
+      normalizeAnchors(primaryAnchors),
+    );
+  }
+  if (referenceTrack !== "secondary") {
+    applyAnchorInterpolationToUnmatchedGroups(
+      secondaryOutputCues,
+      prepared.secondaryShiftedCues,
+      prepared.secondaryGroups,
+      secondaryMatchedGroups,
+      normalizeAnchors(secondaryAnchors),
+    );
+  }
 
   return {
     primaryCues: primaryOutputCues,
     secondaryCues: secondaryOutputCues,
-    autoSecondaryShiftMs,
-    matchedGroupCount: matchedSpans.length,
-    matchedSectionCount: matchedSpans.length,
+    autoSecondaryShiftMs: prepared.autoSecondaryShiftMs,
+    matchedGroupCount: prepared.matchedSpans.length,
+    matchedSectionCount: prepared.matchedSpans.length,
     matchedPrimaryGroupCount: primaryMatchedGroups.size,
     matchedSecondaryGroupCount: secondaryMatchedGroups.size,
-    primaryGroupCount: primaryGroups.length,
-    secondaryGroupCount: secondaryGroups.length,
+    primaryGroupCount: prepared.primaryGroups.length,
+    secondaryGroupCount: prepared.secondaryGroups.length,
+    referenceTrack,
     active: true,
   };
+}
+
+export function buildTimingLockedCues(options: TimingLockOptions): TimingLockResult {
+  const prepared = prepareTimingLock({
+    primaryCues: options.primaryCues,
+    secondaryCues: options.secondaryCues,
+    primaryOffsetMs: options.primaryOffsetMs,
+    secondaryOffsetMs: options.secondaryOffsetMs,
+    enabled: options.enabled,
+    groupGapMs: options.groupGapMs,
+  });
+  return buildTimingLockedCuesFromPrepared(prepared, options.blend);
 }

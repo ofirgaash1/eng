@@ -39,6 +39,13 @@ async function hashTrackedBackup(input: unknown): Promise<string> {
   return sha256Hex(serializeTrackedBackupData(input));
 }
 
+function resolveLastPublishedAt(
+  remoteExportedAt: string | null | undefined,
+  fallback?: number,
+): number {
+  return parseTimestamp(remoteExportedAt) ?? fallback ?? Date.now();
+}
+
 export default function UsernameSyncAutosave() {
   const syncInFlightRef = useRef(false);
   const retryAfterRef = useRef(0);
@@ -59,34 +66,37 @@ export default function UsernameSyncAutosave() {
         return;
       }
 
-      const syncState = loadUsernameSyncState(username);
-      if (!syncState) {
-        return;
-      }
-      if (Date.now() - syncState.lastPublishedAt < AUTOSAVE_MIN_SAVE_GAP_MS) {
-        return;
-      }
-
       syncInFlightRef.current = true;
       try {
         const { payload: localPayload } = await exportAllData({ includeCueTokens: false });
         const localHash = await hashTrackedBackup(localPayload);
+        const syncState = loadUsernameSyncState(username);
 
-        if (localHash === syncState.lastPublishedTrackedHash) {
+        if (syncState && localHash === syncState.lastPublishedTrackedHash) {
           clearTrackedSyncDataChanges();
           return;
         }
 
         const remote = await importBackupFromUsername(username);
         const remoteHash = await hashTrackedBackup(remote.payload);
-        const remotePublishedAt = parseTimestamp(remote.metadata.exportedAt) ?? Date.now();
+        const remotePublishedAt = resolveLastPublishedAt(
+          remote.metadata.exportedAt,
+          syncState?.lastPublishedAt,
+        );
+        const effectiveSyncState = {
+          lastPublishedAt: remotePublishedAt,
+          lastPublishedTrackedHash: remoteHash,
+        };
+
+        saveUsernameSyncState(username, effectiveSyncState);
 
         if (remoteHash === localHash) {
-          saveUsernameSyncState(username, {
-            lastPublishedAt: remotePublishedAt,
-            lastPublishedTrackedHash: localHash,
-          });
+          saveUsernameSyncState(username, effectiveSyncState);
           clearTrackedSyncDataChanges();
+          return;
+        }
+
+        if (Date.now() - effectiveSyncState.lastPublishedAt < AUTOSAVE_MIN_SAVE_GAP_MS) {
           return;
         }
 
@@ -97,10 +107,7 @@ export default function UsernameSyncAutosave() {
         const mergedHash = await hashTrackedBackup(mergedPayload);
 
         if (mergedHash === remoteHash) {
-          saveUsernameSyncState(username, {
-            lastPublishedAt: remotePublishedAt,
-            lastPublishedTrackedHash: mergedHash,
-          });
+          saveUsernameSyncState(username, effectiveSyncState);
           clearTrackedSyncDataChanges();
           return;
         }
