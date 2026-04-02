@@ -104,29 +104,42 @@ export default function App() {
       <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-6">
         <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <h1 className="text-2xl font-semibold">Subtitle Word Tracker</h1>
-          <nav className="flex gap-2">
-            <NavLink to="/" className={navLinkClass} end>
-              Player
-            </NavLink>
-            <NavLink to="/words" className={navLinkClass}>
-              Words
-            </NavLink>
-            <NavLink to="/quotes" className={navLinkClass}>
-              Quotes
-            </NavLink>
-            <NavLink to="/stats" className={navLinkClass}>
-              Stats
-            </NavLink>
-            <NavLink to="/settings" className={navLinkClass}>
-              Settings
-            </NavLink>
-            <NavLink to="/vlsub" className={navLinkClass}>
-              Find Subs
-            </NavLink>
-            <NavLink to="/help" className={navLinkClass}>
-              ?
-            </NavLink>
-          </nav>
+          <div className="flex flex-wrap items-center gap-3 sm:justify-end">
+            <form action="https://www.paypal.com/donate" method="post" target="_top" className="donate-form">
+              <input type="hidden" name="hosted_button_id" value="MRJF9A83YR2BE" />
+              <input
+                type="image"
+                alt="Donate with PayPal"
+                src="https://www.paypalobjects.com/en_US/IL/i/btn/btn_donateCC_LG.gif"
+                name="submit"
+                title="PayPal - The safer, easier way to pay online!"
+                className="h-10 w-auto"
+              />
+            </form>
+            <nav className="flex flex-wrap gap-2">
+              <NavLink to="/" className={navLinkClass} end>
+                Player
+              </NavLink>
+              <NavLink to="/words" className={navLinkClass}>
+                Words
+              </NavLink>
+              <NavLink to="/quotes" className={navLinkClass}>
+                Quotes
+              </NavLink>
+              <NavLink to="/stats" className={navLinkClass}>
+                Stats
+              </NavLink>
+              <NavLink to="/settings" className={navLinkClass}>
+                Settings
+              </NavLink>
+              <NavLink to="/vlsub" className={navLinkClass}>
+                Find Subs
+              </NavLink>
+              <NavLink to="/help" className={navLinkClass}>
+                ?
+              </NavLink>
+            </nav>
+          </div>
         </header>
         <main className="flex-1 rounded-lg border border-white/10 bg-white/5 p-6 shadow-xl backdrop-blur">
           <div className={isPlayerRoute ? "" : "hidden"} aria-hidden={!isPlayerRoute}>
