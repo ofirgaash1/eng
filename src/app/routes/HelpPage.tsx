@@ -104,6 +104,17 @@ export default function HelpPage() {
                 </a>
               </li>
               <li>
+                או ב־
+                <a
+                  href="https://subdl.com/"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mr-1 text-white underline decoration-white/40 underline-offset-4"
+                >
+                  subdl.com
+                </a>
+              </li>
+              <li>
                 או בלשונית <strong>Find Subs</strong> באתר
                 <blockquote className="mt-2 rounded border-l-2 border-white/20 bg-white/5 px-3 py-2 text-xs text-white/60">
                   שימו לב: יש שם כמות מוגבלת של הורדות יומיות – אבל שווה לנסות
