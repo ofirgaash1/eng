@@ -40,6 +40,11 @@ import {
   searchOpenSubtitlesSubtitles,
   withOpenSubtitlesApiKeyFallback,
 } from "../../services/openSubtitles";
+import {
+  isGoogleTranslateConfigured,
+  translateEnglishCueToHebrew,
+  translateEnglishWordToHebrew,
+} from "../../services/googleTranslate";
 
 type WorkerResponse = {
   id: string;
@@ -226,6 +231,7 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
   const playerShortcuts = usePrefsStore((state) => state.prefs.playerShortcuts);
   const mediaLibrary = usePrefsStore((state) => state.prefs.mediaLibrary);
   const updatePlayerShortcuts = usePrefsStore((state) => state.updatePlayerShortcuts);
+  const hoverTranslationConfigured = isGoogleTranslateConfigured();
 
   const handleTokenClick = useCallback(
     (token: Token, cue: Cue) => {
@@ -233,6 +239,16 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
     },
     [addWord],
   );
+
+  const handleTokenHoverTranslate = useCallback(async (token: Token, _cue: Cue) => {
+    const result = await translateEnglishWordToHebrew(token.text);
+    return result.text;
+  }, []);
+
+  const handleCueHoverTranslate = useCallback(async (cue: Cue) => {
+    const result = await translateEnglishCueToHebrew(cue.rawText);
+    return result.text;
+  }, []);
 
   const handleTokenContextMenu = useCallback(
     (token: Token, cue: Cue) => {
@@ -287,6 +303,62 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
     await rebuildInboxFromStoredSubtitleFiles();
     await refreshCandidateWords();
   }, [refreshCandidateWords]);
+
+  const loadCachedPrimaryCues = useCallback(
+    async (hash: string, fileName: string) => {
+      const cached = await getCuesForFile(hash);
+      if (!cached) {
+        return false;
+      }
+
+      setSubtitleError(null);
+      setSubtitleName(fileName);
+      applyPrimaryCuesState(cached);
+      await Promise.all([
+        upsertSubtitleFile({
+          name: fileName,
+          bytesHash: hash,
+          totalCues: cached.length,
+        }),
+        saveLastSession({
+          subtitleName: fileName,
+          subtitleHash: hash,
+          subtitleText: undefined,
+        }),
+      ]);
+      return true;
+    },
+    [applyPrimaryCuesState],
+  );
+
+  const loadCachedSecondaryCues = useCallback(
+    async (hash: string, fileName: string) => {
+      const cached = await getCuesForFile(hash);
+      if (!cached) {
+        return false;
+      }
+
+      setSecondarySubtitleError(null);
+      setSecondarySubtitleName(fileName);
+      applySecondaryCuesState(cached);
+      setSecondarySubtitleEnabled(true);
+      await Promise.all([
+        upsertSubtitleFile({
+          name: fileName,
+          bytesHash: hash,
+          totalCues: cached.length,
+        }),
+        saveLastSession({
+          secondarySubtitleName: fileName,
+          secondarySubtitleHash: hash,
+          secondarySubtitleText: undefined,
+          secondarySubtitleEnabled: true,
+        }),
+      ]);
+      return true;
+    },
+    [applySecondaryCuesState],
+  );
 
   const scheduleQuickSubtitleDownloadHint = useCallback(() => {
     setShowQuickSubtitleDownload(true);
@@ -593,9 +665,17 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
       }
 
       if (session.secondarySubtitleHash) {
-        setSecondarySubtitleLoading(true);
-        setSecondarySubtitleError(null);
-        if (session.secondarySubtitleText) {
+        const restoredSecondaryFromCache = await loadCachedSecondaryCues(
+          session.secondarySubtitleHash,
+          session.secondarySubtitleName ?? session.secondarySubtitleHash,
+        );
+        if (cancelled) {
+          return;
+        }
+
+        if (!restoredSecondaryFromCache && session.secondarySubtitleText) {
+          setSecondarySubtitleLoading(true);
+          setSecondarySubtitleError(null);
           const worker = workerRef.current;
           if (worker) {
             const requestId = crypto.randomUUID();
@@ -630,30 +710,21 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
               }
             }
           }
-        } else {
-          const cachedSecondary = await getCuesForFile(session.secondarySubtitleHash);
-          if (cancelled) {
-            return;
-          }
-
-          if (cachedSecondary) {
-            applySecondaryCuesState(cachedSecondary);
-            setSecondarySubtitleLoading(false);
-            await upsertSubtitleFile({
-              name: session.secondarySubtitleName ?? session.secondarySubtitleHash,
-              bytesHash: session.secondarySubtitleHash,
-              totalCues: cachedSecondary.length,
-            });
-          } else {
-            setSecondarySubtitleLoading(false);
-          }
         }
       }
 
       if (session.subtitleHash) {
-        setSubtitleLoading(true);
-        setSubtitleError(null);
-        if (session.subtitleText) {
+        const restoredPrimaryFromCache = await loadCachedPrimaryCues(
+          session.subtitleHash,
+          session.subtitleName ?? session.subtitleHash,
+        );
+        if (cancelled) {
+          return;
+        }
+
+        if (!restoredPrimaryFromCache && session.subtitleText) {
+          setSubtitleLoading(true);
+          setSubtitleError(null);
           const worker = workerRef.current;
           if (worker) {
             const requestId = crypto.randomUUID();
@@ -687,26 +758,7 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
               setSubtitleLoading(false);
             }
           }
-          return;
         }
-
-        const cached = await getCuesForFile(session.subtitleHash);
-        if (cancelled) {
-          return;
-        }
-
-        if (cached) {
-          applyPrimaryCuesState(cached);
-          setSubtitleLoading(false);
-          await upsertSubtitleFile({
-            name: session.subtitleName ?? session.subtitleHash,
-            bytesHash: session.subtitleHash,
-            totalCues: cached.length,
-          });
-          return;
-        }
-
-        setSubtitleLoading(false);
       }
     };
 
@@ -715,7 +767,13 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
     return () => {
       cancelled = true;
     };
-  }, [applyParsedCues, applyParsedSecondaryCues, videoUrl]);
+  }, [
+    applyParsedCues,
+    applyParsedSecondaryCues,
+    loadCachedPrimaryCues,
+    loadCachedSecondaryCues,
+    videoUrl,
+  ]);
 
   useEffect(() => {
     if (!prefsInitialized) return;
@@ -935,16 +993,20 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
 
       resetPlayback();
       setSubtitleError(null);
-      setSubtitleLoading(true);
       setCurrentTimeMs(0);
 
       try {
-        const text = await readSubtitleText(file);
         const hash = await hashBlob(file);
+        const loadedFromCache = await loadCachedPrimaryCues(hash, file.name);
+        if (loadedFromCache) {
+          return true;
+        }
 
         setSubtitleName(file.name);
+        setSubtitleLoading(true);
         applyPrimaryCuesState([]);
 
+        const text = await readSubtitleText(file);
         void saveLastSession({
           subtitleName: file.name,
           subtitleText: text,
@@ -985,7 +1047,13 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
         }
       }
     },
-    [applyParsedCues, applyPrimaryCuesState, rebuildInboxAfterSubtitleImport, resetPlayback],
+    [
+      applyParsedCues,
+      applyPrimaryCuesState,
+      loadCachedPrimaryCues,
+      rebuildInboxAfterSubtitleImport,
+      resetPlayback,
+    ],
   );
 
   const processSecondarySubtitleFile = useCallback(
@@ -994,15 +1062,19 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
       let queuedWorker = false;
 
       setSecondarySubtitleError(null);
-      setSecondarySubtitleLoading(true);
 
       try {
-        const text = await readSubtitleText(file);
         const hash = await hashBlob(file);
+        const loadedFromCache = await loadCachedSecondaryCues(hash, file.name);
+        if (loadedFromCache) {
+          return true;
+        }
 
         setSecondarySubtitleName(file.name);
+        setSecondarySubtitleLoading(true);
         applySecondaryCuesState([]);
 
+        const text = await readSubtitleText(file);
         void saveLastSession({
           secondarySubtitleName: file.name,
           secondarySubtitleText: text,
@@ -1050,6 +1122,7 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
     [
       applyParsedSecondaryCues,
       applySecondaryCuesState,
+      loadCachedSecondaryCues,
       rebuildInboxAfterSubtitleImport,
     ],
   );
@@ -1789,6 +1862,10 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
                         onTokenContextMenu={handleTokenContextMenu}
                         isRtl={isSecondarySubtitleRtl}
                         className="justify-center text-center"
+                        hoverTranslateEnabled={hoverTranslationConfigured && !isSecondarySubtitleRtl}
+                        hoverTranslatePlacement="below"
+                        onHoverTranslateWord={handleTokenHoverTranslate}
+                        onHoverTranslateCue={handleCueHoverTranslate}
                       />
                     </div>
                   ))}
@@ -1828,6 +1905,10 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
                         onTokenContextMenu={handleTokenContextMenu}
                         isRtl={isSubtitleRtl}
                         className="justify-center text-center"
+                        hoverTranslateEnabled={hoverTranslationConfigured && !isSubtitleRtl}
+                        hoverTranslatePlacement="above"
+                        onHoverTranslateWord={handleTokenHoverTranslate}
+                        onHoverTranslateCue={handleCueHoverTranslate}
                       />
                     </div>
                   ))}

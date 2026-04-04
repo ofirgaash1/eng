@@ -88,6 +88,17 @@ src/
 
 All commands run entirely offline using the local Node environment.
 
+## Optional Hover Translation
+
+To enable hover translations on English subtitle tokens, add a Google Cloud Translation API key to `.env.local`:
+
+```bash
+VITE_GOOGLE_TRANSLATE_API_KEY=your_api_key_here
+```
+
+Use Cloud Translation's daily quota controls to keep usage under your target budget. For the current setup, `14,000`
+characters per day stays under roughly `98,000` characters per week.
+
 ## Deploying to GitHub Pages
 
 The build defaults to relative asset paths, so publishing the contents of `dist/` works for repositories served from
