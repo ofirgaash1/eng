@@ -13,7 +13,7 @@ import {
   shouldAddSpaceBefore,
 } from "../../../core/subtitles/displayTokens";
 
-const HOVER_OPEN_DELAY_MS = 280;
+const HOVER_OPEN_DELAY_MS = 100;
 const HOVER_CLOSE_DELAY_MS = 140;
 
 type HoverTranslatePlacement = "above" | "below";
@@ -229,7 +229,7 @@ function SubtitleTokenButton({
           : "Translating word...";
 
   const translationToneClass =
-    activeTranslation.status === "error" ? "text-rose-100" : "text-white";
+    activeTranslation.status === "error" ? "text-rose-200" : "text-slate-50";
 
   return (
     <span
@@ -265,17 +265,20 @@ function SubtitleTokenButton({
       </button>
       {hoverTranslateEnabled && token.isWord && popoverOpen && (
         <div
-          className={`absolute ${placementClass} w-[min(22rem,calc(100vw-2rem))] rounded-xl border border-white/20 bg-slate-950/95 p-3 text-xs text-white shadow-2xl`}
+          className={`subtitle-translate-popover absolute ${placementClass} w-[min(24rem,calc(100vw-2rem))] rounded-2xl border border-white/15 bg-slate-950/92 p-3 shadow-[0_18px_45px_rgba(0,0,0,0.6)] backdrop-blur-md`}
         >
-          <div className="flex flex-wrap items-center gap-2">
-            <span className={`min-w-0 flex-1 break-words leading-5 ${translationToneClass}`}>
+          <div className="flex flex-wrap items-center gap-3">
+            <bdi
+              dir="auto"
+              className={`block min-w-0 flex-1 break-words text-base leading-6 ${translationToneClass}`}
+            >
               {translationText}
-            </span>
+            </bdi>
             {popoverMode === "word" && onHoverTranslateCue && (
               <button
                 type="button"
                 onClick={handleTranslateCueClick}
-                className="shrink-0 rounded-full border border-sky-400/40 bg-sky-500/10 px-2 py-1 text-[11px] font-medium text-sky-100 transition hover:bg-sky-500/20"
+                className="rounded-full border border-sky-300/30 bg-sky-400/15 px-3 py-1.5 text-xs font-semibold text-sky-50 transition hover:bg-sky-400/25"
               >
                 Translate line
               </button>
