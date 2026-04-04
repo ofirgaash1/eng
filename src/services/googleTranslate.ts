@@ -1,4 +1,4 @@
-const RAW_GOOGLE_TRANSLATE_API_KEY = "AIzaSyCL1slhaZAlAypXizqk-ZWL7Y86Ca8euko".trim();
+const RAW_GOOGLE_TRANSLATE_API_KEY = "AIzaSyAghybzxt26ZFHXnGPXnQYlgVDCllriU5U".trim();
 const GOOGLE_TRANSLATE_API_URL = "https://translation.googleapis.com/language/translate/v2";
 
 type GoogleTranslateResponse = {
