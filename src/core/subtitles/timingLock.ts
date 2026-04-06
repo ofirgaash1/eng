@@ -28,6 +28,7 @@ type PreparedTimingLock = {
   primaryAdjustedCues: Cue[];
   secondaryAdjustedCues: Cue[];
   secondaryShiftedCues: Cue[];
+  secondaryCueShiftMs: number[];
   autoSecondaryShiftMs: number;
   matchedSpans: SpanMatch[];
   primaryGroups: CueGroup[];
@@ -78,6 +79,7 @@ const GROUP_SKIP_PENALTY = 90;
 const MAX_MATCH_SPAN = 3;
 const MAX_GROUP_DURATION_MS = 2800;
 const MAX_GROUP_CUE_COUNT = 3;
+const SECTION_GAP_MS = 20_000;
 const CREDIT_MARKER_RE =
   /(qsubs|addic7ed|opensubtitles|subscene|www\.|sync(?:ed)?|translated|subtitle|subtitles|תורגם|סונכרן|כתוביות|מצוות|epitaph|zipc)/i;
 
@@ -195,6 +197,22 @@ function buildCueGroups(cues: Cue[], groupGapMs: number): CueGroup[] {
   return groups;
 }
 
+function splitGroupsIntoSections(groups: CueGroup[], sectionGapMs: number): CueGroup[][] {
+  if (groups.length === 0) {
+    return [];
+  }
+
+  for (let index = 1; index < groups.length; index += 1) {
+    const previous = groups[index - 1];
+    const group = groups[index];
+    if (group.startMs - previous.endMs > sectionGapMs) {
+      return [groups.slice(0, index), groups.slice(index)];
+    }
+  }
+
+  return [groups];
+}
+
 function scoreGlobalOverlap(primaryGroups: CueGroup[], secondaryGroups: CueGroup[], shiftMs: number): number {
   let primaryIndex = 0;
   let secondaryIndex = 0;
@@ -244,15 +262,29 @@ function scoreGlobalOverlap(primaryGroups: CueGroup[], secondaryGroups: CueGroup
   return totalOverlap * (0.35 + ratio) - boundaryPenalty;
 }
 
-function findBestGlobalShift(primaryGroups: CueGroup[], secondaryGroups: CueGroup[]): number {
+function findBestGlobalShift(
+  primaryGroups: CueGroup[],
+  secondaryGroups: CueGroup[],
+  preferredShiftMs?: number,
+  preferredRangeMs?: number,
+): number {
   if (primaryGroups.length === 0 || secondaryGroups.length === 0) {
     return 0;
   }
 
-  const minimumShiftMs =
+  let minimumShiftMs =
     primaryGroups[0].startMs - secondaryGroups[secondaryGroups.length - 1].endMs;
-  const maximumShiftMs =
+  let maximumShiftMs =
     primaryGroups[primaryGroups.length - 1].endMs - secondaryGroups[0].startMs;
+
+  if (
+    typeof preferredShiftMs === "number" &&
+    typeof preferredRangeMs === "number" &&
+    preferredRangeMs > 0
+  ) {
+    minimumShiftMs = Math.max(minimumShiftMs, preferredShiftMs - preferredRangeMs);
+    maximumShiftMs = Math.min(maximumShiftMs, preferredShiftMs + preferredRangeMs);
+  }
 
   let bestShiftMs = 0;
   let bestScore = Number.NEGATIVE_INFINITY;
@@ -285,6 +317,85 @@ function findBestGlobalShift(primaryGroups: CueGroup[], secondaryGroups: CueGrou
   }
 
   return refinedShiftMs;
+}
+
+function median(values: number[]): number {
+  if (values.length === 0) {
+    return 0;
+  }
+
+  const sorted = [...values].sort((left, right) => left - right);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
+function findBestSectionShift(primaryGroups: CueGroup[], secondaryGroups: CueGroup[]): number {
+  const primaryCandidates = primaryGroups.slice(0, 6);
+  const secondaryCandidates = secondaryGroups.slice(0, 21);
+  const candidateShifts = new Set<number>();
+
+  for (const primaryGroup of primaryCandidates) {
+    for (const secondaryGroup of secondaryCandidates) {
+      candidateShifts.add(primaryGroup.startMs - secondaryGroup.startMs);
+      candidateShifts.add(primaryGroup.endMs - secondaryGroup.endMs);
+    }
+  }
+
+  if (candidateShifts.size === 0) {
+    return findBestGlobalShift(primaryGroups, secondaryGroups);
+  }
+
+  let bestShiftMs = 0;
+  let bestScore = Number.NEGATIVE_INFINITY;
+
+  for (const candidateShiftMs of candidateShifts) {
+    const refinedShiftMs = findBestGlobalShift(
+      primaryGroups,
+      secondaryGroups,
+      candidateShiftMs,
+      OFFSET_FINE_RANGE_MS,
+    );
+    const score = scoreGlobalOverlap(primaryGroups, secondaryGroups, refinedShiftMs);
+    if (score > bestScore) {
+      bestScore = score;
+      bestShiftMs = refinedShiftMs;
+    }
+  }
+
+  return bestShiftMs;
+}
+
+function buildSecondaryCueShiftsBySection(
+  primaryGroups: CueGroup[],
+  secondaryGroups: CueGroup[],
+  secondaryCueCount: number,
+): { shifts: number[]; representativeShiftMs: number } {
+  const fallbackShiftMs = findBestGlobalShift(primaryGroups, secondaryGroups);
+  const shifts = Array.from({ length: secondaryCueCount }, () => fallbackShiftMs);
+  const primarySections = splitGroupsIntoSections(primaryGroups, SECTION_GAP_MS);
+  const secondarySections = splitGroupsIntoSections(secondaryGroups, SECTION_GAP_MS);
+
+  if (primarySections.length <= 1 || secondarySections.length <= 1) {
+    return { shifts, representativeShiftMs: fallbackShiftMs };
+  }
+
+  const pairedSectionCount = Math.min(primarySections.length, secondarySections.length);
+  const sectionShifts: number[] = [];
+
+  for (let index = 0; index < pairedSectionCount; index += 1) {
+    const sectionShiftMs = findBestSectionShift(primarySections[index], secondarySections[index]);
+    sectionShifts.push(sectionShiftMs);
+
+    for (const group of secondarySections[index]) {
+      for (const cueIndex of group.cueIndices) {
+        shifts[cueIndex] = sectionShiftMs;
+      }
+    }
+  }
+
+  return {
+    shifts,
+    representativeShiftMs: median(sectionShifts),
+  };
 }
 
 function buildGroupSpan(groups: CueGroup[], groupStartIndex: number, spanLength: number): GroupSpan {
@@ -652,6 +763,13 @@ function resolveReferenceTrack(blend: number): TimingLockResult["referenceTrack"
   return "blend";
 }
 
+function getSecondarySpanShiftMs(prepared: PreparedTimingLock, span: GroupSpan): number {
+  const shifts = span.cueIndices
+    .map((cueIndex) => prepared.secondaryCueShiftMs[cueIndex])
+    .filter((shift): shift is number => typeof shift === "number");
+  return shifts.length > 0 ? median(shifts) : prepared.autoSecondaryShiftMs;
+}
+
 export function prepareTimingLock(
   options: Omit<TimingLockOptions, "blend">,
 ): PreparedTimingLock {
@@ -663,6 +781,7 @@ export function prepareTimingLock(
       primaryAdjustedCues,
       secondaryAdjustedCues,
       secondaryShiftedCues: secondaryAdjustedCues.map((cue) => ({ ...cue })),
+      secondaryCueShiftMs: secondaryAdjustedCues.map(() => 0),
       autoSecondaryShiftMs: 0,
       matchedSpans: [],
       primaryGroups: [],
@@ -674,8 +793,15 @@ export function prepareTimingLock(
   const groupGapMs = options.groupGapMs ?? DEFAULT_GROUP_GAP_MS;
   const primaryGroups = buildCueGroups(primaryAdjustedCues, groupGapMs);
   const secondaryGroupsBase = buildCueGroups(secondaryAdjustedCues, groupGapMs);
-  const autoSecondaryShiftMs = findBestGlobalShift(primaryGroups, secondaryGroupsBase);
-  const secondaryShiftedCues = shiftCues(secondaryAdjustedCues, autoSecondaryShiftMs);
+  const { shifts: secondaryCueShiftMs, representativeShiftMs: autoSecondaryShiftMs } =
+    buildSecondaryCueShiftsBySection(
+      primaryGroups,
+      secondaryGroupsBase,
+      secondaryAdjustedCues.length,
+    );
+  const secondaryShiftedCues = secondaryAdjustedCues.map((cue, index) =>
+    shiftCue(cue, secondaryCueShiftMs[index] ?? autoSecondaryShiftMs),
+  );
   const secondaryGroups = buildCueGroups(secondaryShiftedCues, groupGapMs);
   const matchedSpans = alignGroups(primaryGroups, secondaryGroups);
 
@@ -683,6 +809,7 @@ export function prepareTimingLock(
     primaryAdjustedCues,
     secondaryAdjustedCues,
     secondaryShiftedCues,
+    secondaryCueShiftMs,
     autoSecondaryShiftMs,
     matchedSpans,
     primaryGroups,
@@ -723,8 +850,9 @@ export function buildTimingLockedCuesFromPrepared(
       unifiedStartMs = match.primarySpan.startMs;
       unifiedEndMs = match.primarySpan.endMs;
     } else if (referenceTrack === "secondary") {
-      unifiedStartMs = match.secondarySpan.startMs - prepared.autoSecondaryShiftMs;
-      unifiedEndMs = match.secondarySpan.endMs - prepared.autoSecondaryShiftMs;
+      const secondarySpanShiftMs = getSecondarySpanShiftMs(prepared, match.secondarySpan);
+      unifiedStartMs = match.secondarySpan.startMs - secondarySpanShiftMs;
+      unifiedEndMs = match.secondarySpan.endMs - secondarySpanShiftMs;
     } else {
       unifiedStartMs = Math.round(
         lerp(match.primarySpan.startMs, match.secondarySpan.startMs, clampedBlend),

@@ -27,7 +27,6 @@ import {
   prepareTimingLock,
 } from "../../core/subtitles/timingLock";
 import {
-  buildOpenSubtitlesSearchQueries,
   buildPrefixedSubtitleFileName,
   delay,
   downloadOpenSubtitlesSubtitle,
@@ -37,7 +36,7 @@ import {
   OPEN_SUBTITLES_LOCAL_API_KEY,
   pickMostDownloadedSubtitle,
   saveBlobAsDownload,
-  searchOpenSubtitlesSubtitles,
+  searchOpenSubtitlesSubtitlesWithFallback,
   withOpenSubtitlesApiKeyFallback,
 } from "../../services/openSubtitles";
 import {
@@ -1129,27 +1128,17 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
 
   const downloadBestSubtitleForLanguage = useCallback(async (language: string) => {
     const apiKeys = getQuickSubtitleApiKeys(language);
-    const searchQueries = buildOpenSubtitlesSearchQueries(videoName);
     const searchResult = await withOpenSubtitlesApiKeyFallback(
       apiKeys,
       async (apiKey) => {
-        for (const query of searchQueries) {
-          const payload = await searchOpenSubtitlesSubtitles({
-            apiKey,
-            query,
-            language,
-          });
-          const item = pickMostDownloadedSubtitle(payload.items);
-          if (item) {
-            return {
-              apiKey,
-              item,
-            };
-          }
-        }
+        const payload = await searchOpenSubtitlesSubtitlesWithFallback({
+          apiKey,
+          query: videoName,
+          language,
+        });
         return {
           apiKey,
-          item: null,
+          item: pickMostDownloadedSubtitle(payload.items),
         };
       },
     );

@@ -1,14 +1,19 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildOpenSubtitlesSearchQueries,
   buildPrefixedSubtitleFileName,
   ensureSrtFileName,
   pickMostDownloadedSubtitle,
+  searchOpenSubtitlesSubtitlesWithFallback,
   withOpenSubtitlesApiKeyFallback,
   type OpenSubtitlesItem,
 } from "./openSubtitles";
 
 describe("openSubtitles helpers", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("keeps or normalizes subtitle file names to .srt", () => {
     expect(ensureSrtFileName("episode.srt", "1")).toBe("episode.srt");
     expect(ensureSrtFileName("episode.zip", "1")).toBe("episode.srt");
@@ -29,10 +34,31 @@ describe("openSubtitles helpers", () => {
       ),
     ).toEqual([
       "Homeland (2011) - S02E05 - Q&A (1080p BluRay x265 Silence)",
+      "Homeland (2011) - S02E05 - Q&A",
       "Homeland - S02E05 - Q&A (1080p BluRay x265 Silence)",
       "Homeland - S02E05 - Q&A",
       "Homeland - S02E05",
       "Homeland S02E05",
+    ]);
+  });
+
+  it("strips release metadata from TV filenames without dropping the show and episode", () => {
+    expect(
+      buildOpenSubtitlesSearchQueries(
+        "Homeland S03E03 Tower of David.1080p.WEB-DL.DD5.1.x265-n0m1",
+      ),
+    ).toEqual([
+      "Homeland S03E03 Tower of David 1080p WEB-DL DD5 1 x265-n0m1",
+      "Homeland S03E03 Tower of David",
+      "Homeland - S03E03",
+      "Homeland S03E03",
+    ]);
+  });
+
+  it("keeps movie title and year when stripping release metadata", () => {
+    expect(buildOpenSubtitlesSearchQueries("The.Matrix.1999.1080p.BluRay.x264-YIFY.mkv")).toEqual([
+      "The Matrix 1999 1080p BluRay x264-YIFY",
+      "The Matrix 1999",
     ]);
   });
 
@@ -65,6 +91,74 @@ describe("openSubtitles helpers", () => {
     ];
 
     expect(pickMostDownloadedSubtitle(items)?.id).toBe("high");
+  });
+
+  it("searches every fallback query and deduplicates returned subtitles", async () => {
+    const exactItem: OpenSubtitlesItem = {
+      id: "exact",
+      attributes: {
+        language: "en",
+        download_count: 12,
+        files: [{ file_id: 1, file_name: "exact.srt" }],
+      },
+    };
+    const sharedItem: OpenSubtitlesItem = {
+      id: "shared",
+      attributes: {
+        language: "en",
+        download_count: 20,
+        files: [{ file_id: 2, file_name: "shared.srt" }],
+      },
+    };
+    const broadItem: OpenSubtitlesItem = {
+      id: "broad",
+      attributes: {
+        language: "en",
+        download_count: 50,
+        files: [{ file_id: 3, file_name: "broad.srt" }],
+      },
+    };
+
+    const payloadsByQuery = new Map<string, OpenSubtitlesItem[]>([
+      [
+        "Homeland S03E03 Tower of David 1080p WEB-DL DD5 1 x265-n0m1",
+        [exactItem, sharedItem],
+      ],
+      ["Homeland S03E03 Tower of David", [sharedItem]],
+      ["Homeland - S03E03", [broadItem]],
+      ["Homeland S03E03", [broadItem]],
+    ]);
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      const query = url.searchParams.get("query") ?? "";
+      const data = payloadsByQuery.get(query) ?? [];
+      expect(url.searchParams.get("order_by")).toBe("download_count");
+
+      return new Response(
+        JSON.stringify({
+          data,
+          total_count: data.length,
+        }),
+        {
+          status: 200,
+          statusText: "OK",
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await searchOpenSubtitlesSubtitlesWithFallback({
+      apiKey: "key",
+      query: "Homeland S03E03 Tower of David.1080p.WEB-DL.DD5.1.x265-n0m1",
+      language: "en",
+    });
+
+    expect(result.queries).toEqual(Array.from(payloadsByQuery.keys()));
+    expect(result.items.map((item) => item.id)).toEqual(["exact", "shared", "broad"]);
+    expect(result.totalCount).toBe(3);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
   it("falls back across API keys until one works", async () => {

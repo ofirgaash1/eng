@@ -6,7 +6,7 @@ import {
   OPEN_SUBTITLES_LOCAL_API_KEY,
   type OpenSubtitlesItem,
   saveBlobAsDownload,
-  searchOpenSubtitlesSubtitles,
+  searchOpenSubtitlesSubtitlesWithFallback,
 } from "../../services/openSubtitles";
 
 const DEFAULT_API_KEY = OPEN_SUBTITLES_DEFAULT_API_KEY;
@@ -75,14 +75,14 @@ export default function VlsubPage() {
       setIsSearching(true);
 
       try {
-        const payload = await searchOpenSubtitlesSubtitles({
+        const payload = await searchOpenSubtitlesSubtitlesWithFallback({
           apiKey,
           query: params.query,
           language: params.languages,
         });
         setResults(payload.items);
         updateStatus(
-          `Found ${payload.totalCount} subtitle(s).`,
+          `Found ${payload.totalCount} subtitle(s) across ${payload.queries.length} search variant(s).`,
           "success",
         );
       } catch (error) {

@@ -142,4 +142,39 @@ describe("subtitle timing lock", () => {
     expect(result.primaryCues[1].startMs).toBe(2513);
     expect(result.primaryCues[1].endMs).toBe(2615);
   });
+
+  it("handles a major cut with extra leading cues in the secondary section", () => {
+    const primaryCues: Cue[] = [
+      cue(1, 0, 1000, "intro a"),
+      cue(2, 2000, 3000, "intro b"),
+      cue(3, 100000, 101000, "scene a"),
+      cue(4, 102000, 103000, "scene b"),
+      cue(5, 104000, 105000, "scene c"),
+    ];
+    const secondaryCues: Cue[] = [
+      cue(1, 10000, 11000, "intro a secondary"),
+      cue(2, 12000, 13000, "intro b secondary"),
+      cue(3, 70000, 71000, "extra lead-in"),
+      cue(4, 72000, 73000, "extra lead-in 2"),
+      cue(5, 120000, 121000, "scene a secondary"),
+      cue(6, 122000, 123000, "scene b secondary"),
+      cue(7, 124000, 125000, "scene c secondary"),
+    ];
+
+    const result = buildTimingLockedCues({
+      primaryCues,
+      secondaryCues,
+      primaryOffsetMs: 0,
+      secondaryOffsetMs: 0,
+      blend: 0,
+      enabled: true,
+      groupGapMs: 180,
+    });
+
+    expect(result.secondaryCues[0].startMs).toBe(primaryCues[0].startMs);
+    expect(result.secondaryCues[1].startMs).toBe(primaryCues[1].startMs);
+    expect(result.secondaryCues[4].startMs).toBe(primaryCues[2].startMs);
+    expect(result.secondaryCues[5].startMs).toBe(primaryCues[3].startMs);
+    expect(result.secondaryCues[6].startMs).toBe(primaryCues[4].startMs);
+  });
 });

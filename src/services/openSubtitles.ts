@@ -13,7 +13,9 @@ export const OPEN_SUBTITLES_API_KEYS = Array.from(
 );
 const OPEN_SUBTITLES_RATE_LIMIT_DELAY_MS = 1250;
 const OPEN_SUBTITLES_RELEASE_TAG_RE =
-  /\b(?:480p|576p|720p|1080p|2160p|blu(?:ray)?|web(?:rip|dl)?|x26[45]|h\.?26[45]|hevc|aac|ddp|dd5\.1|dvdrip|hdrip|brrip|proper|repack|remux|silence)\b/i;
+  /\b(?:480p|576p|720p|1080p|2160p|4k|8k|blu(?:ray)?|b[dr]rip|web(?:rip|[-\s]?dl)?|hdtv|x26[45]|h[.\s]?26[45]|hevc|avc|10bit|aac|dts|ddp?|eac3|ac3|dd5[\s.]?1|5[\s.]?1|dvdrip|hdrip|proper|repack|remux|nf|amzn|hulu|yts|rarbg|eztv|silence)\b/i;
+const OPEN_SUBTITLES_KNOWN_FILE_EXTENSION_RE =
+  /\.(?:3g2|3gp|asf|avi|divx|flv|m2ts|m4v|mkv|mov|mp4|mpeg|mpg|ogm|ogv|ts|vob|webm|wmv|srt|sub|ass|ssa)$/i;
 
 export type OpenSubtitlesFile = {
   file_id: number;
@@ -61,9 +63,9 @@ export function buildPrefixedSubtitleFileName(prefix: string, videoName: string)
 
 function normalizeSearchQuery(query: string): string {
   return query
-    .replace(/\.[^.\\/]+$/, "")
+    .replace(OPEN_SUBTITLES_KNOWN_FILE_EXTENSION_RE, "")
     .replace(/[._]+/g, " ")
-    .replace(/\s*-\s*/g, " - ")
+    .replace(/\s+-\s+/g, " - ")
     .replace(/\s+/g, " ")
     .replace(/(?:^-\s*|\s*-\s*$)/g, "")
     .trim();
@@ -86,6 +88,57 @@ function stripReleaseMetadata(query: string): string {
   return stripBracketedSegments(query, (segment) => OPEN_SUBTITLES_RELEASE_TAG_RE.test(segment));
 }
 
+function stripReleaseSuffix(query: string): string {
+  const releaseMatch = query.match(OPEN_SUBTITLES_RELEASE_TAG_RE);
+  if (releaseMatch?.index === undefined) {
+    return query;
+  }
+
+  const candidate = normalizeSearchQuery(query.slice(0, releaseMatch.index));
+  if (candidate.split(/\s+/).length < 2) {
+    return query;
+  }
+
+  return candidate;
+}
+
+function formatEpisodeIdentifier(season: string, episode: string): string {
+  return `S${season.padStart(2, "0")}E${episode.padStart(2, "0")}`;
+}
+
+type EpisodeIdentifierMatch = {
+  index: number;
+  episode: string;
+};
+
+function findEpisodeIdentifier(query: string): EpisodeIdentifierMatch | null {
+  const patterns = [
+    {
+      regex: /\bS(\d{1,2})\s*E(\d{1,2})\b/i,
+      format: (match: RegExpMatchArray) => formatEpisodeIdentifier(match[1], match[2]),
+    },
+    {
+      regex: /\b(\d{1,2})x(\d{1,2})\b/i,
+      format: (match: RegExpMatchArray) => formatEpisodeIdentifier(match[1], match[2]),
+    },
+  ];
+
+  const matches = patterns
+    .map(({ regex, format }) => {
+      const match = query.match(regex);
+      if (!match || match.index === undefined) {
+        return null;
+      }
+      return {
+        index: match.index,
+        episode: format(match),
+      };
+    })
+    .filter((match): match is EpisodeIdentifierMatch => match !== null);
+
+  return matches.sort((left, right) => left.index - right.index)[0] ?? null;
+}
+
 export function buildOpenSubtitlesSearchQueries(videoName: string): string[] {
   const queries: string[] = [];
   const pushQuery = (value: string) => {
@@ -101,19 +154,30 @@ export function buildOpenSubtitlesSearchQueries(videoName: string): string[] {
   const base = normalizeSearchQuery(videoName);
   pushQuery(base);
 
+  const withoutBracketedRelease = normalizeSearchQuery(stripReleaseMetadata(base));
+  pushQuery(withoutBracketedRelease);
+
+  const withoutReleaseSuffix = normalizeSearchQuery(stripReleaseSuffix(withoutBracketedRelease));
+  pushQuery(withoutReleaseSuffix);
+
   const withoutYear = normalizeSearchQuery(stripStandaloneYear(base));
   pushQuery(withoutYear);
 
-  const withoutYearOrRelease = normalizeSearchQuery(stripReleaseMetadata(withoutYear));
-  pushQuery(withoutYearOrRelease);
+  const withoutYearOrBracketedRelease = normalizeSearchQuery(stripReleaseMetadata(withoutYear));
+  pushQuery(withoutYearOrBracketedRelease);
 
-  const episodeMatch = withoutYearOrRelease.match(/\bS\d{1,2}E\d{1,2}\b/i);
-  if (episodeMatch?.index !== undefined) {
-    const episode = episodeMatch[0].toUpperCase();
-    const title = normalizeSearchQuery(withoutYearOrRelease.slice(0, episodeMatch.index));
+  const withoutYearOrReleaseSuffix = normalizeSearchQuery(
+    stripReleaseSuffix(withoutYearOrBracketedRelease),
+  );
+  pushQuery(withoutYearOrReleaseSuffix);
+
+  const episodeSource = withoutYearOrReleaseSuffix || withoutReleaseSuffix || withoutYear || base;
+  const episodeMatch = findEpisodeIdentifier(episodeSource);
+  if (episodeMatch) {
+    const title = normalizeSearchQuery(episodeSource.slice(0, episodeMatch.index));
     if (title) {
-      pushQuery(`${title} - ${episode}`);
-      pushQuery(`${title} ${episode}`);
+      pushQuery(`${title} - ${episodeMatch.episode}`);
+      pushQuery(`${title} ${episodeMatch.episode}`);
     }
   }
 
@@ -160,6 +224,7 @@ export async function searchOpenSubtitlesSubtitles(params: {
   const url = new URL(`${API_BASE}/subtitles`);
   url.searchParams.set("query", params.query);
   url.searchParams.set("languages", params.language);
+  url.searchParams.set("order_by", "download_count");
 
   const response = await fetch(url, { headers: buildHeaders(params.apiKey) });
   if (!response.ok) {
@@ -175,6 +240,36 @@ export async function searchOpenSubtitlesSubtitles(params: {
   return {
     items: payload.data ?? [],
     totalCount: payload.total_count ?? payload.data?.length ?? 0,
+  };
+}
+
+export async function searchOpenSubtitlesSubtitlesWithFallback(params: {
+  apiKey: string;
+  query: string;
+  language: string;
+}) {
+  const queries = buildOpenSubtitlesSearchQueries(params.query);
+  const itemsById = new Map<string, OpenSubtitlesItem>();
+
+  for (const query of queries) {
+    const payload = await searchOpenSubtitlesSubtitles({
+      apiKey: params.apiKey,
+      query,
+      language: params.language,
+    });
+
+    for (const item of payload.items) {
+      if (!itemsById.has(item.id)) {
+        itemsById.set(item.id, item);
+      }
+    }
+  }
+
+  const items = Array.from(itemsById.values());
+  return {
+    items,
+    totalCount: items.length,
+    queries,
   };
 }
 
