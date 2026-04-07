@@ -177,4 +177,80 @@ describe("subtitle timing lock", () => {
     expect(result.secondaryCues[5].startMs).toBe(primaryCues[3].startMs);
     expect(result.secondaryCues[6].startMs).toBe(primaryCues[4].startMs);
   });
+
+  it("handles a major cut with extra leading cues in the primary section", () => {
+    const primaryCues: Cue[] = [
+      cue(1, 0, 1000, "intro a"),
+      cue(2, 2000, 3000, "intro b"),
+      cue(3, 70000, 71000, "extra lead-in 1"),
+      cue(4, 72000, 73000, "extra lead-in 2"),
+      cue(5, 74000, 75000, "extra lead-in 3"),
+      cue(6, 76000, 77000, "extra lead-in 4"),
+      cue(7, 78000, 79000, "extra lead-in 5"),
+      cue(8, 80000, 81000, "extra lead-in 6"),
+      cue(9, 82000, 83000, "extra lead-in 7"),
+      cue(10, 120000, 121000, "scene a"),
+      cue(11, 122000, 123000, "scene b"),
+      cue(12, 124000, 125000, "scene c"),
+    ];
+    const secondaryCues: Cue[] = [
+      cue(1, 10000, 11000, "intro a secondary"),
+      cue(2, 12000, 13000, "intro b secondary"),
+      cue(3, 100000, 101000, "scene a secondary"),
+      cue(4, 102000, 103000, "scene b secondary"),
+      cue(5, 104000, 105000, "scene c secondary"),
+    ];
+
+    const result = buildTimingLockedCues({
+      primaryCues,
+      secondaryCues,
+      primaryOffsetMs: 0,
+      secondaryOffsetMs: 0,
+      blend: 0,
+      enabled: true,
+      groupGapMs: 180,
+    });
+
+    expect(result.secondaryCues[0].startMs).toBe(primaryCues[0].startMs);
+    expect(result.secondaryCues[1].startMs).toBe(primaryCues[1].startMs);
+    expect(result.secondaryCues[2].startMs).toBe(primaryCues[9].startMs);
+    expect(result.secondaryCues[3].startMs).toBe(primaryCues[10].startMs);
+    expect(result.secondaryCues[4].startMs).toBe(primaryCues[11].startMs);
+  });
+
+  it("keeps the previous section shift when only one side splits on a missing cue", () => {
+    const primaryCues: Cue[] = [
+      cue(1, 0, 1000, "intro a"),
+      cue(2, 2000, 3000, "intro b"),
+      cue(3, 18000, 19000, "non-dialogue bridge"),
+      cue(4, 38000, 39000, "scene a"),
+      cue(5, 40000, 41000, "scene b"),
+      cue(6, 100000, 101000, "late scene a"),
+      cue(7, 102000, 103000, "late scene b"),
+    ];
+    const secondaryCues: Cue[] = [
+      cue(1, 0, 1000, "intro a secondary"),
+      cue(2, 2000, 3000, "intro b secondary"),
+      cue(3, 38000, 39000, "scene a secondary"),
+      cue(4, 40000, 41000, "scene b secondary"),
+      cue(5, 100000, 101000, "late scene a secondary"),
+      cue(6, 102000, 103000, "late scene b secondary"),
+    ];
+
+    const result = buildTimingLockedCues({
+      primaryCues,
+      secondaryCues,
+      primaryOffsetMs: 0,
+      secondaryOffsetMs: 0,
+      blend: 0,
+      enabled: true,
+      groupGapMs: 180,
+    });
+
+    expect(result.autoSecondaryShiftMs).toBe(0);
+    expect(result.secondaryCues[2].startMs).toBe(primaryCues[3].startMs);
+    expect(result.secondaryCues[3].startMs).toBe(primaryCues[4].startMs);
+    expect(result.secondaryCues[4].startMs).toBe(primaryCues[5].startMs);
+    expect(result.secondaryCues[5].startMs).toBe(primaryCues[6].startMs);
+  });
 });

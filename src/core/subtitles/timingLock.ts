@@ -80,6 +80,10 @@ const MAX_MATCH_SPAN = 3;
 const MAX_GROUP_DURATION_MS = 2800;
 const MAX_GROUP_CUE_COUNT = 3;
 const SECTION_GAP_MS = 20_000;
+const SECTION_SHIFT_PRIMARY_CANDIDATE_GROUP_COUNT = 6;
+const SECTION_SHIFT_LOOKAHEAD_GROUP_COUNT = 21;
+const MIN_SECTION_SHIFT_GROUP_COUNT = 2;
+const SECTION_CONTINUITY_TOLERANCE_MS = 2_500;
 const CREDIT_MARKER_RE =
   /(qsubs|addic7ed|opensubtitles|subscene|www\.|sync(?:ed)?|translated|subtitle|subtitles|תורגם|סונכרן|כתוביות|מצוות|epitaph|zipc)/i;
 
@@ -328,9 +332,112 @@ function median(values: number[]): number {
   return sorted[Math.floor(sorted.length / 2)];
 }
 
-function findBestSectionShift(primaryGroups: CueGroup[], secondaryGroups: CueGroup[]): number {
-  const primaryCandidates = primaryGroups.slice(0, 6);
-  const secondaryCandidates = secondaryGroups.slice(0, 21);
+function findEarlySectionGapIndex(groups: CueGroup[]): number | undefined {
+  const lookaheadLimit = Math.min(groups.length, SECTION_SHIFT_LOOKAHEAD_GROUP_COUNT);
+
+  for (let index = 1; index < lookaheadLimit; index += 1) {
+    if (groups[index].startMs - groups[index - 1].endMs <= SECTION_GAP_MS) {
+      continue;
+    }
+
+    return index;
+  }
+
+  return undefined;
+}
+
+function appendCandidateGroups(candidates: CueGroup[], seenGroups: Set<CueGroup>, groups: CueGroup[]): void {
+  for (const group of groups) {
+    if (!seenGroups.has(group)) {
+      candidates.push(group);
+      seenGroups.add(group);
+    }
+  }
+}
+
+function buildPrimarySectionShiftCandidates(groups: CueGroup[], preferAfterEarlyGap: boolean): CueGroup[] {
+  const candidates: CueGroup[] = [];
+  const seenGroups = new Set<CueGroup>();
+  const earlyGapIndex = findEarlySectionGapIndex(groups);
+  const baseCandidates = groups.slice(0, SECTION_SHIFT_PRIMARY_CANDIDATE_GROUP_COUNT);
+  const afterGapCandidates =
+    typeof earlyGapIndex === "number"
+      ? groups.slice(
+          earlyGapIndex,
+          Math.min(groups.length, earlyGapIndex + SECTION_SHIFT_PRIMARY_CANDIDATE_GROUP_COUNT),
+        )
+      : [];
+
+  if (preferAfterEarlyGap) {
+    appendCandidateGroups(candidates, seenGroups, afterGapCandidates);
+    appendCandidateGroups(candidates, seenGroups, baseCandidates);
+  } else {
+    appendCandidateGroups(candidates, seenGroups, baseCandidates);
+    appendCandidateGroups(candidates, seenGroups, afterGapCandidates);
+  }
+
+  return candidates;
+}
+
+function shiftedSectionStartDistanceMs(
+  primaryGroups: CueGroup[],
+  secondarySection: CueGroup[],
+  shiftMs: number,
+): number {
+  if (primaryGroups.length === 0 || secondarySection.length === 0) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  const shiftedStartMs = secondarySection[0].startMs + shiftMs;
+  let nearestDistanceMs = Number.POSITIVE_INFINITY;
+
+  for (const primaryGroup of primaryGroups) {
+    const distanceMs = Math.abs(primaryGroup.startMs - shiftedStartMs);
+    if (distanceMs < nearestDistanceMs) {
+      nearestDistanceMs = distanceMs;
+    }
+  }
+
+  return nearestDistanceMs;
+}
+
+function shouldContinueSectionShift(
+  primaryGroups: CueGroup[],
+  secondarySection: CueGroup[],
+  continuityShiftMs: number,
+): boolean {
+  return (
+    shiftedSectionStartDistanceMs(primaryGroups, secondarySection, continuityShiftMs) <=
+    SECTION_CONTINUITY_TOLERANCE_MS
+  );
+}
+
+function findBestSectionShift(
+  primaryGroups: CueGroup[],
+  secondaryGroups: CueGroup[],
+  fallbackShiftMs: number,
+): number {
+  if (
+    primaryGroups.length < MIN_SECTION_SHIFT_GROUP_COUNT ||
+    secondaryGroups.length < MIN_SECTION_SHIFT_GROUP_COUNT
+  ) {
+    return fallbackShiftMs;
+  }
+
+  const primaryEarlyGapIndex = findEarlySectionGapIndex(primaryGroups);
+  const secondaryEarlyGapIndex = findEarlySectionGapIndex(secondaryGroups);
+  const hasPrimaryOnlyEarlyGap =
+    typeof primaryEarlyGapIndex === "number" && typeof secondaryEarlyGapIndex !== "number";
+  const hasSecondaryOnlyEarlyGap =
+    typeof secondaryEarlyGapIndex === "number" && typeof primaryEarlyGapIndex !== "number";
+  const scoringPrimaryGroups = hasPrimaryOnlyEarlyGap
+    ? primaryGroups.slice(primaryEarlyGapIndex)
+    : primaryGroups;
+  const scoringSecondaryGroups = hasSecondaryOnlyEarlyGap
+    ? secondaryGroups.slice(secondaryEarlyGapIndex)
+    : secondaryGroups;
+  const primaryCandidates = buildPrimarySectionShiftCandidates(primaryGroups, hasPrimaryOnlyEarlyGap);
+  const secondaryCandidates = secondaryGroups.slice(0, SECTION_SHIFT_LOOKAHEAD_GROUP_COUNT);
   const candidateShifts = new Set<number>();
 
   for (const primaryGroup of primaryCandidates) {
@@ -341,20 +448,20 @@ function findBestSectionShift(primaryGroups: CueGroup[], secondaryGroups: CueGro
   }
 
   if (candidateShifts.size === 0) {
-    return findBestGlobalShift(primaryGroups, secondaryGroups);
+    return fallbackShiftMs;
   }
 
-  let bestShiftMs = 0;
+  let bestShiftMs = fallbackShiftMs;
   let bestScore = Number.NEGATIVE_INFINITY;
 
   for (const candidateShiftMs of candidateShifts) {
     const refinedShiftMs = findBestGlobalShift(
-      primaryGroups,
-      secondaryGroups,
+      scoringPrimaryGroups,
+      scoringSecondaryGroups,
       candidateShiftMs,
       OFFSET_FINE_RANGE_MS,
     );
-    const score = scoreGlobalOverlap(primaryGroups, secondaryGroups, refinedShiftMs);
+    const score = scoreGlobalOverlap(scoringPrimaryGroups, scoringSecondaryGroups, refinedShiftMs);
     if (score > bestScore) {
       bestScore = score;
       bestShiftMs = refinedShiftMs;
@@ -380,10 +487,15 @@ function buildSecondaryCueShiftsBySection(
 
   const pairedSectionCount = Math.min(primarySections.length, secondarySections.length);
   const sectionShifts: number[] = [];
+  let previousSectionShiftMs = fallbackShiftMs;
 
   for (let index = 0; index < pairedSectionCount; index += 1) {
-    const sectionShiftMs = findBestSectionShift(primarySections[index], secondarySections[index]);
+    const sectionShiftMs =
+      index > 0 && shouldContinueSectionShift(primaryGroups, secondarySections[index], previousSectionShiftMs)
+        ? previousSectionShiftMs
+        : findBestSectionShift(primarySections[index], secondarySections[index], fallbackShiftMs);
     sectionShifts.push(sectionShiftMs);
+    previousSectionShiftMs = sectionShiftMs;
 
     for (const group of secondarySections[index]) {
       for (const cueIndex of group.cueIndices) {
