@@ -3,6 +3,7 @@ import {
   buildOpenSubtitlesSearchQueries,
   buildPrefixedSubtitleFileName,
   ensureSrtFileName,
+  isBlockedOpenSubtitlesItem,
   pickMostDownloadedSubtitle,
   searchOpenSubtitlesSubtitlesWithFallback,
   withOpenSubtitlesApiKeyFallback,
@@ -93,6 +94,30 @@ describe("openSubtitles helpers", () => {
     expect(pickMostDownloadedSubtitle(items)?.id).toBe("high");
   });
 
+  it("blocks IMMERSE releases from selection", () => {
+    const blockedItem: OpenSubtitlesItem = {
+      id: "blocked",
+      attributes: {
+        language: "en",
+        release: "Homeland.S03E09.720p.HDTV.x264-IMMERSE",
+        download_count: 999,
+        files: [{ file_id: 1, file_name: "Homeland.S03E09.720p.HDTV.x264-IMMERSE.srt" }],
+      },
+    };
+    const allowedItem: OpenSubtitlesItem = {
+      id: "allowed",
+      attributes: {
+        language: "en",
+        download_count: 50,
+        files: [{ file_id: 2, file_name: "Homeland.S03E09.720p.HDTV.x264-OTHER.srt" }],
+      },
+    };
+
+    expect(isBlockedOpenSubtitlesItem(blockedItem)).toBe(true);
+    expect(isBlockedOpenSubtitlesItem(allowedItem)).toBe(false);
+    expect(pickMostDownloadedSubtitle([blockedItem, allowedItem])?.id).toBe("allowed");
+  });
+
   it("searches every fallback query and deduplicates returned subtitles", async () => {
     const exactItem: OpenSubtitlesItem = {
       id: "exact",
@@ -159,6 +184,49 @@ describe("openSubtitles helpers", () => {
     expect(result.items.map((item) => item.id)).toEqual(["exact", "shared", "broad"]);
     expect(result.totalCount).toBe(3);
     expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("filters blocked IMMERSE results from fallback search results", async () => {
+    const blockedItem: OpenSubtitlesItem = {
+      id: "blocked",
+      attributes: {
+        language: "en",
+        download_count: 999,
+        files: [{ file_id: 1, file_name: "Homeland.S03E09.720p.HDTV.x264-IMMERSE.srt" }],
+      },
+    };
+    const allowedItem: OpenSubtitlesItem = {
+      id: "allowed",
+      attributes: {
+        language: "en",
+        download_count: 10,
+        files: [{ file_id: 2, file_name: "Homeland.S03E09.720p.HDTV.x264-OTHER.srt" }],
+      },
+    };
+
+    const fetchMock = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({
+          data: [blockedItem, allowedItem],
+          total_count: 2,
+        }),
+        {
+          status: 200,
+          statusText: "OK",
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await searchOpenSubtitlesSubtitlesWithFallback({
+      apiKey: "key",
+      query: "Homeland.S03E09.720p.HDTV.x264-IMMERSE",
+      language: "en",
+    });
+
+    expect(result.items.map((item) => item.id)).toEqual(["allowed"]);
+    expect(result.totalCount).toBe(1);
   });
 
   it("falls back across API keys until one works", async () => {
