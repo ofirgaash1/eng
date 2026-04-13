@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { defineConfig, loadEnv, type Plugin } from "vite";
 
@@ -10,10 +11,30 @@ function createManifestPlugin(mode: string): Plugin {
     "https://translation.googleapis.com/*",
     ...(syncOrigin ? [`${syncOrigin}/*`] : []),
   ];
+  const iconFiles = [
+    { size: "16", path: resolve(__dirname, "src/extension/assets/icons/icon-16.png") },
+    { size: "32", path: resolve(__dirname, "src/extension/assets/icons/icon-32.png") },
+    { size: "48", path: resolve(__dirname, "src/extension/assets/icons/icon-48.png") },
+    { size: "128", path: resolve(__dirname, "src/extension/assets/icons/icon-128.png") },
+  ] as const;
+  const icons = Object.fromEntries(iconFiles.map(({ size }) => [size, `assets/icon-${size}.png`]));
+  const actionIcons = Object.fromEntries(
+    iconFiles
+      .filter(({ size }) => size === "16" || size === "32")
+      .map(({ size }) => [size, `assets/icon-${size}.png`]),
+  );
 
   return {
     name: "subtitle-word-tracker-extension-manifest",
     generateBundle() {
+      iconFiles.forEach(({ size, path }) => {
+        this.emitFile({
+          type: "asset",
+          fileName: `assets/icon-${size}.png`,
+          source: readFileSync(path),
+        });
+      });
+
       this.emitFile({
         type: "asset",
         fileName: "manifest.json",
@@ -24,6 +45,7 @@ function createManifestPlugin(mode: string): Plugin {
             version: "0.1.0",
             description:
               "Clickable YouTube subtitle overlay with saved vocabulary and shared username sync.",
+            icons,
             permissions: ["storage", "alarms", "tabs"],
             host_permissions: hostPermissions,
             background: {
@@ -32,6 +54,7 @@ function createManifestPlugin(mode: string): Plugin {
             },
             action: {
               default_popup: "src/extension/popup/popup.html",
+              default_icon: actionIcons,
             },
             content_scripts: [
               {
