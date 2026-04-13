@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Subtitle Word Tracker</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+
+      body {
+        margin: 0;
+        min-width: 320px;
+        background: linear-gradient(160deg, #020617 0%, #0f172a 50%, #111827 100%);
+        color: #e5eef9;
+        font: 14px/1.45 "Segoe UI", system-ui, sans-serif;
+      }
+
+      main {
+        padding: 14px;
+      }
+
+      h1 {
+        margin: 0 0 4px;
+        font-size: 16px;
+      }
+
+      p {
+        margin: 0;
+        color: rgba(226, 232, 240, 0.78);
+      }
+
+      .stack {
+        display: grid;
+        gap: 12px;
+      }
+
+      .panel {
+        padding: 12px;
+        border: 1px solid rgba(148, 163, 184, 0.18);
+        border-radius: 14px;
+        background: rgba(15, 23, 42, 0.7);
+      }
+
+      label {
+        display: grid;
+        gap: 6px;
+        font-size: 12px;
+        color: rgba(226, 232, 240, 0.75);
+      }
+
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 10px 12px;
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        border-radius: 10px;
+        background: rgba(15, 23, 42, 0.95);
+        color: #f8fafc;
+      }
+
+      .row {
+        display: flex;
+        gap: 8px;
+      }
+
+      button {
+        flex: 1;
+        padding: 10px 12px;
+        border: 1px solid rgba(125, 211, 252, 0.32);
+        border-radius: 999px;
+        background: rgba(14, 165, 233, 0.14);
+        color: #e0f2fe;
+        font: inherit;
+        cursor: pointer;
+      }
+
+      button.secondary {
+        border-color: rgba(148, 163, 184, 0.28);
+        background: rgba(148, 163, 184, 0.12);
+        color: #e2e8f0;
+      }
+
+      button:disabled {
+        opacity: 0.55;
+        cursor: default;
+      }
+
+      .meta {
+        display: grid;
+        gap: 4px;
+        font-size: 12px;
+      }
+
+      .status {
+        min-height: 18px;
+        font-size: 12px;
+        color: #bae6fd;
+      }
+
+      .note {
+        font-size: 12px;
+        color: rgba(226, 232, 240, 0.72);
+      }
+    </style>
+  </head>
+  <body>
+    <main class="stack">
+      <section class="panel stack">
+        <div>
+          <h1>YouTube Vocabulary Overlay</h1>
+          <p>Click or right-click subtitle words on YouTube to save them with the current cue.</p>
+        </div>
+        <div class="meta">
+          <div id="word-count">Words: 0</div>
+          <div id="sync-state">Sync: not configured</div>
+        </div>
+      </section>
+
+      <section class="panel stack">
+        <label>
+          Shared sync username
+          <input id="username" type="text" autocomplete="off" spellcheck="false" />
+        </label>
+        <div class="row">
+          <button id="save-username" class="secondary">Save Username</button>
+          <button id="create-username">Create Username</button>
+        </div>
+        <div class="row">
+          <button id="sync-now">Sync Now</button>
+        </div>
+        <div id="status" class="status"></div>
+        <div class="note">
+          Use the same username in the web app Settings page to share vocabulary through the
+          existing backup sync service.
+        </div>
+      </section>
+    </main>
+    <script type="module" src="./popup.ts"></script>
+  </body>
+</html>

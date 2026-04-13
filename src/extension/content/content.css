@@ -1,0 +1,145 @@
+.swt-host {
+  position: fixed;
+  inset: 0 auto auto 0;
+  pointer-events: none;
+  z-index: 2147483646;
+}
+
+.swt-shell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.swt-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0 5% 5%;
+  pointer-events: none;
+}
+
+.swt-lines {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.28rem;
+  max-width: min(80ch, 92%);
+}
+
+.swt-line {
+  display: flex;
+  width: 100%;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.swt-line[data-align="left"] {
+  justify-content: flex-start;
+}
+
+.swt-line[data-align="right"] {
+  justify-content: flex-end;
+}
+
+.swt-line-content {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  max-width: 100%;
+  border-radius: 0.35rem;
+  padding: 0.02em 0.16em;
+  background: rgba(0, 0, 0, 0.34);
+  color: #fff;
+  font: 600 32px/1.35 "Segoe UI", system-ui, sans-serif;
+  letter-spacing: normal;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.85);
+  --swt-text-stroke: 0.8px rgba(0, 0, 0, 0.92);
+}
+
+.swt-line-content[data-nowrap="true"] {
+  flex: none;
+  flex-wrap: nowrap;
+  width: max-content;
+  max-width: none;
+}
+
+.swt-token {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  letter-spacing: inherit;
+  text-shadow: inherit;
+  -webkit-text-stroke: var(--swt-text-stroke);
+  pointer-events: auto;
+}
+
+.swt-token-text {
+  display: inline-block;
+  padding: 0 0.05em;
+  border-radius: 0.22em;
+  background: transparent;
+  -webkit-text-stroke: var(--swt-text-stroke);
+}
+
+.swt-token--exact .swt-token-text {
+  background: rgba(52, 211, 153, 0.38);
+}
+
+.swt-token--variant .swt-token-text {
+  background: rgba(56, 189, 248, 0.28);
+}
+
+.swt-token[data-space-before="true"] {
+  padding-inline-start: 0.16em;
+}
+
+.swt-status {
+  position: absolute;
+  top: 0.9rem;
+  right: 0.9rem;
+  max-width: min(22rem, 48vw);
+  padding: 0.55rem 0.8rem;
+  border-radius: 999px;
+  background: rgba(2, 6, 23, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #e2e8f0;
+  font: 500 12px/1.2 "Segoe UI", system-ui, sans-serif;
+  letter-spacing: 0.01em;
+  opacity: 0;
+  transform: translateY(-6px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  pointer-events: none;
+}
+
+.swt-status[data-visible="true"] {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.swt-tooltip {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 0.5rem);
+  transform: translateX(-50%);
+  min-width: 6rem;
+  max-width: min(18rem, 40vw);
+  padding: 0.55rem 0.8rem;
+  border-radius: 0.9rem;
+  background: rgba(2, 6, 23, 0.94);
+  border: 1px solid rgba(125, 211, 252, 0.35);
+  color: #f8fafc;
+  font: 500 14px/1.35 "Segoe UI", system-ui, sans-serif;
+  text-align: center;
+  white-space: normal;
+  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.48);
+  pointer-events: none;
+}
