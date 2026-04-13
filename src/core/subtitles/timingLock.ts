@@ -42,6 +42,7 @@ type CueGroup = {
   endMs: number;
   rawText: string;
   creditLikeScore: number;
+  textProfile: TextProfile;
 };
 
 type GroupSpan = {
@@ -53,6 +54,7 @@ type GroupSpan = {
   endMs: number;
   totalSpeechMs: number;
   creditLikeScore: number;
+  textProfile: TextProfile;
 };
 
 type SpanMatch = {
@@ -63,6 +65,27 @@ type SpanMatch = {
 type AnchorPoint = {
   sourceMs: number;
   targetMs: number;
+};
+
+type SectionShiftResult = {
+  score: number;
+  shiftMs: number;
+};
+
+type TextProfile = {
+  lineCount: number;
+  wordCount: number;
+  wordTokens: string[];
+  latinWordTokens: string[];
+  digitTokens: string[];
+  questionCount: number;
+  exclamationCount: number;
+  ellipsisCount: number;
+  colonCount: number;
+  dialogueLineCount: number;
+  speakerLabelCount: number;
+  parentheticalLineCount: number;
+  musicLineCount: number;
 };
 
 type CellAction =
@@ -84,6 +107,12 @@ const SECTION_SHIFT_PRIMARY_CANDIDATE_GROUP_COUNT = 6;
 const SECTION_SHIFT_LOOKAHEAD_GROUP_COUNT = 21;
 const MIN_SECTION_SHIFT_GROUP_COUNT = 2;
 const SECTION_CONTINUITY_TOLERANCE_MS = 2_500;
+const SECTION_SHIFT_REFERENCE_TOLERANCE_MS = 45_000;
+const MUSIC_MARKER_RE = /[♪♫♬♩]/;
+const DIGIT_TOKEN_RE = /\d+/g;
+const SPEAKER_LABEL_RE = /^[\p{L}\p{N} .'\-]{2,24}:/u;
+const DIALOGUE_LINE_RE = /^\s*[-–—]\s*/;
+const PARENTHETICAL_LINE_RE = /^\s*[\(\[].*[\)\]]\s*$/;
 const CREDIT_MARKER_RE =
   /(qsubs|addic7ed|opensubtitles|subscene|www\.|sync(?:ed)?|translated|subtitle|subtitles|תורגם|סונכרן|כתוביות|מצוות|epitaph|zipc)/i;
 
@@ -141,6 +170,230 @@ function scoreCueCreditLike(text: string): number {
   return score;
 }
 
+function parseTextProfile(text: string): TextProfile {
+  const compact = stripMarkup(text);
+  const lines = compact
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const wordTokens = Array.from(
+    new Set(
+      compact
+        .toLocaleLowerCase()
+        .match(/[\p{L}\p{N}]+/gu)
+        ?.filter((token) => token.length >= 2) ?? [],
+    ),
+  ).sort();
+  const latinWordTokens = wordTokens.filter((token) => /[a-z]/.test(token));
+  const digitTokens = Array.from(new Set(compact.match(DIGIT_TOKEN_RE) ?? []));
+  let questionCount = 0;
+  let exclamationCount = 0;
+  let ellipsisCount = 0;
+  let colonCount = 0;
+  let dialogueLineCount = 0;
+  let speakerLabelCount = 0;
+  let parentheticalLineCount = 0;
+  let musicLineCount = 0;
+
+  for (const line of lines) {
+    questionCount += (line.match(/\?/g) ?? []).length;
+    exclamationCount += (line.match(/!/g) ?? []).length;
+    ellipsisCount += (line.match(/\.{3,}|…/g) ?? []).length;
+    colonCount += (line.match(/:/g) ?? []).length;
+    if (DIALOGUE_LINE_RE.test(line)) {
+      dialogueLineCount += 1;
+    }
+    if (SPEAKER_LABEL_RE.test(line)) {
+      speakerLabelCount += 1;
+    }
+    if (PARENTHETICAL_LINE_RE.test(line)) {
+      parentheticalLineCount += 1;
+    }
+    if (MUSIC_MARKER_RE.test(line)) {
+      musicLineCount += 1;
+    }
+  }
+
+  const wordCount = compact
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .split(/\s+/)
+    .filter(Boolean).length;
+
+  return {
+    lineCount: lines.length,
+    wordCount,
+    wordTokens,
+    latinWordTokens,
+    digitTokens,
+    questionCount,
+    exclamationCount,
+    ellipsisCount,
+    colonCount,
+    dialogueLineCount,
+    speakerLabelCount,
+    parentheticalLineCount,
+    musicLineCount,
+  };
+}
+
+function combineTextProfiles(profiles: TextProfile[]): TextProfile {
+  const wordTokens = new Set<string>();
+  const latinWordTokens = new Set<string>();
+  const digitTokens = new Set<string>();
+  let lineCount = 0;
+  let wordCount = 0;
+  let questionCount = 0;
+  let exclamationCount = 0;
+  let ellipsisCount = 0;
+  let colonCount = 0;
+  let dialogueLineCount = 0;
+  let speakerLabelCount = 0;
+  let parentheticalLineCount = 0;
+  let musicLineCount = 0;
+
+  for (const profile of profiles) {
+    lineCount += profile.lineCount;
+    wordCount += profile.wordCount;
+    for (const wordToken of profile.wordTokens) {
+      wordTokens.add(wordToken);
+    }
+    for (const latinWordToken of profile.latinWordTokens) {
+      latinWordTokens.add(latinWordToken);
+    }
+    questionCount += profile.questionCount;
+    exclamationCount += profile.exclamationCount;
+    ellipsisCount += profile.ellipsisCount;
+    colonCount += profile.colonCount;
+    dialogueLineCount += profile.dialogueLineCount;
+    speakerLabelCount += profile.speakerLabelCount;
+    parentheticalLineCount += profile.parentheticalLineCount;
+    musicLineCount += profile.musicLineCount;
+    for (const digitToken of profile.digitTokens) {
+      digitTokens.add(digitToken);
+    }
+  }
+
+  return {
+    lineCount,
+    wordCount,
+    wordTokens: [...wordTokens].sort(),
+    latinWordTokens: [...latinWordTokens].sort(),
+    digitTokens: [...digitTokens].sort(),
+    questionCount,
+    exclamationCount,
+    ellipsisCount,
+    colonCount,
+    dialogueLineCount,
+    speakerLabelCount,
+    parentheticalLineCount,
+    musicLineCount,
+  };
+}
+
+function countSimilarity(aCount: number, bCount: number): number {
+  const larger = Math.max(aCount, bCount);
+  if (larger <= 0) {
+    return 1;
+  }
+  return 1 - Math.abs(aCount - bCount) / larger;
+}
+
+function hasExactDigitMatch(primaryProfile: TextProfile, secondaryProfile: TextProfile): boolean {
+  if (primaryProfile.digitTokens.length === 0 || secondaryProfile.digitTokens.length === 0) {
+    return false;
+  }
+
+  return (
+    primaryProfile.digitTokens.length === secondaryProfile.digitTokens.length &&
+    primaryProfile.digitTokens.every((digitToken, index) => digitToken === secondaryProfile.digitTokens[index])
+  );
+}
+
+function countSharedTokens(primaryTokens: string[], secondaryTokens: string[]): number {
+  if (primaryTokens.length === 0 || secondaryTokens.length === 0) {
+    return 0;
+  }
+
+  const secondaryTokenSet = new Set(secondaryTokens);
+  let sharedTokenCount = 0;
+  for (const token of primaryTokens) {
+    if (secondaryTokenSet.has(token)) {
+      sharedTokenCount += 1;
+    }
+  }
+  return sharedTokenCount;
+}
+
+function scoreTextCompatibility(primaryProfile: TextProfile, secondaryProfile: TextProfile): number {
+  const lineSimilarity = countSimilarity(primaryProfile.lineCount, secondaryProfile.lineCount);
+  const wordSimilarity = countSimilarity(primaryProfile.wordCount, secondaryProfile.wordCount);
+  const questionSimilarity = countSimilarity(
+    primaryProfile.questionCount,
+    secondaryProfile.questionCount,
+  );
+  const exclamationSimilarity = countSimilarity(
+    primaryProfile.exclamationCount,
+    secondaryProfile.exclamationCount,
+  );
+  const dialogueSimilarity = countSimilarity(
+    primaryProfile.dialogueLineCount,
+    secondaryProfile.dialogueLineCount,
+  );
+  const speakerSimilarity = countSimilarity(
+    primaryProfile.speakerLabelCount,
+    secondaryProfile.speakerLabelCount,
+  );
+  const parentheticalSimilarity = countSimilarity(
+    primaryProfile.parentheticalLineCount,
+    secondaryProfile.parentheticalLineCount,
+  );
+  const musicSimilarity = countSimilarity(primaryProfile.musicLineCount, secondaryProfile.musicLineCount);
+  const ellipsisSimilarity = countSimilarity(primaryProfile.ellipsisCount, secondaryProfile.ellipsisCount);
+  const colonSimilarity = countSimilarity(primaryProfile.colonCount, secondaryProfile.colonCount);
+  const primaryHasDigits = primaryProfile.digitTokens.length > 0;
+  const secondaryHasDigits = secondaryProfile.digitTokens.length > 0;
+  const sharedWordTokenCount = countSharedTokens(primaryProfile.wordTokens, secondaryProfile.wordTokens);
+  const sharedLatinWordTokenCount = countSharedTokens(
+    primaryProfile.latinWordTokens,
+    secondaryProfile.latinWordTokens,
+  );
+
+  let score =
+    lineSimilarity * 70 +
+    wordSimilarity * 90 +
+    questionSimilarity * 35 +
+    exclamationSimilarity * 30 +
+    dialogueSimilarity * 45 +
+    speakerSimilarity * 30 +
+    parentheticalSimilarity * 30 +
+    musicSimilarity * 65 +
+    ellipsisSimilarity * 20 +
+    colonSimilarity * 15;
+
+  if (sharedWordTokenCount > 0) {
+    score += Math.min(180, sharedWordTokenCount * 60);
+  }
+  if (primaryProfile.latinWordTokens.length > 0 && secondaryProfile.latinWordTokens.length > 0) {
+    score += sharedLatinWordTokenCount > 0 ? Math.min(260, sharedLatinWordTokenCount * 90) : -180;
+  }
+
+  if (primaryHasDigits !== secondaryHasDigits) {
+    score -= 150;
+  } else if (primaryHasDigits && secondaryHasDigits) {
+    score += hasExactDigitMatch(primaryProfile, secondaryProfile) ? 150 : -110;
+  }
+
+  if (primaryProfile.musicLineCount > 0 !== (secondaryProfile.musicLineCount > 0)) {
+    score -= 180;
+  }
+
+  if (primaryProfile.parentheticalLineCount > 0 !== (secondaryProfile.parentheticalLineCount > 0)) {
+    score -= 55;
+  }
+
+  return score;
+}
+
 function shiftCue(cue: Cue, offsetMs: number): Cue {
   return {
     ...cue,
@@ -161,17 +414,28 @@ function buildCueGroups(cues: Cue[], groupGapMs: number): CueGroup[] {
     return [];
   }
 
+  const orderedCues = cues
+    .map((cue, index) => ({ cue, originalIndex: index }))
+    .sort(
+      (left, right) =>
+        left.cue.startMs - right.cue.startMs ||
+        left.cue.endMs - right.cue.endMs ||
+        left.originalIndex - right.originalIndex,
+    );
   const groups: CueGroup[] = [];
+  const firstCue = orderedCues[0];
   let current: CueGroup = {
-    cueIndices: [0],
-    startMs: cues[0].startMs,
-    endMs: cues[0].endMs,
-    rawText: cues[0].rawText,
-    creditLikeScore: scoreCueCreditLike(cues[0].rawText),
+    cueIndices: [firstCue.originalIndex],
+    startMs: firstCue.cue.startMs,
+    endMs: firstCue.cue.endMs,
+    rawText: firstCue.cue.rawText,
+    creditLikeScore: scoreCueCreditLike(firstCue.cue.rawText),
+    textProfile: parseTextProfile(firstCue.cue.rawText),
   };
 
-  for (let index = 1; index < cues.length; index += 1) {
-    const cue = cues[index];
+  for (let index = 1; index < orderedCues.length; index += 1) {
+    const orderedCue = orderedCues[index];
+    const cue = orderedCue.cue;
     const gapMs = cue.startMs - current.endMs;
     const nextDurationMs = cue.endMs - current.startMs;
     const nextCueCount = current.cueIndices.length + 1;
@@ -180,20 +444,22 @@ function buildCueGroups(cues: Cue[], groupGapMs: number): CueGroup[] {
       nextDurationMs <= MAX_GROUP_DURATION_MS &&
       nextCueCount <= MAX_GROUP_CUE_COUNT
     ) {
-      current.cueIndices.push(index);
+      current.cueIndices.push(orderedCue.originalIndex);
       current.endMs = Math.max(current.endMs, cue.endMs);
       current.rawText = `${current.rawText}\n${cue.rawText}`;
       current.creditLikeScore += scoreCueCreditLike(cue.rawText);
+      current.textProfile = combineTextProfiles([current.textProfile, parseTextProfile(cue.rawText)]);
       continue;
     }
 
     groups.push(current);
     current = {
-      cueIndices: [index],
+      cueIndices: [orderedCue.originalIndex],
       startMs: cue.startMs,
       endMs: cue.endMs,
       rawText: cue.rawText,
       creditLikeScore: scoreCueCreditLike(cue.rawText),
+      textProfile: parseTextProfile(cue.rawText),
     };
   }
 
@@ -206,15 +472,20 @@ function splitGroupsIntoSections(groups: CueGroup[], sectionGapMs: number): CueG
     return [];
   }
 
+  const sections: CueGroup[][] = [];
+  let sectionStartIndex = 0;
+
   for (let index = 1; index < groups.length; index += 1) {
     const previous = groups[index - 1];
     const group = groups[index];
     if (group.startMs - previous.endMs > sectionGapMs) {
-      return [groups.slice(0, index), groups.slice(index)];
+      sections.push(groups.slice(sectionStartIndex, index));
+      sectionStartIndex = index;
     }
   }
 
-  return [groups];
+  sections.push(groups.slice(sectionStartIndex));
+  return sections;
 }
 
 function scoreGlobalOverlap(primaryGroups: CueGroup[], secondaryGroups: CueGroup[], shiftMs: number): number {
@@ -245,7 +516,18 @@ function scoreGlobalOverlap(primaryGroups: CueGroup[], secondaryGroups: CueGroup
 
     if (overlap > 0) {
       const similarity = durationSimilarity(groupDuration(primaryGroup), groupDuration(secondaryGroup));
-      totalOverlap += overlap * (0.7 + similarity * 0.3);
+      const sharedWordTokenCount = countSharedTokens(
+        primaryGroup.textProfile.wordTokens,
+        secondaryGroup.textProfile.wordTokens,
+      );
+      const lexicalBonus = sharedWordTokenCount * 220;
+      const digitBonus = hasExactDigitMatch(
+        primaryGroup.textProfile,
+        secondaryGroup.textProfile,
+      )
+        ? 120
+        : 0;
+      totalOverlap += overlap * (0.7 + similarity * 0.3) + lexicalBonus + digitBonus;
     }
 
     if (primaryGroup.endMs <= shiftedEnd) {
@@ -416,12 +698,16 @@ function findBestSectionShift(
   primaryGroups: CueGroup[],
   secondaryGroups: CueGroup[],
   fallbackShiftMs: number,
-): number {
+  referenceShiftMs?: number,
+): SectionShiftResult {
   if (
     primaryGroups.length < MIN_SECTION_SHIFT_GROUP_COUNT ||
     secondaryGroups.length < MIN_SECTION_SHIFT_GROUP_COUNT
   ) {
-    return fallbackShiftMs;
+    return {
+      score: scoreGlobalOverlap(primaryGroups, secondaryGroups, fallbackShiftMs),
+      shiftMs: fallbackShiftMs,
+    };
   }
 
   const primaryEarlyGapIndex = findEarlySectionGapIndex(primaryGroups);
@@ -448,7 +734,10 @@ function findBestSectionShift(
   }
 
   if (candidateShifts.size === 0) {
-    return fallbackShiftMs;
+    return {
+      score: scoreGlobalOverlap(scoringPrimaryGroups, scoringSecondaryGroups, fallbackShiftMs),
+      shiftMs: fallbackShiftMs,
+    };
   }
 
   let bestShiftMs = fallbackShiftMs;
@@ -461,6 +750,12 @@ function findBestSectionShift(
       candidateShiftMs,
       OFFSET_FINE_RANGE_MS,
     );
+    if (
+      typeof referenceShiftMs === "number" &&
+      Math.abs(refinedShiftMs - referenceShiftMs) > SECTION_SHIFT_REFERENCE_TOLERANCE_MS
+    ) {
+      continue;
+    }
     const score = scoreGlobalOverlap(scoringPrimaryGroups, scoringSecondaryGroups, refinedShiftMs);
     if (score > bestScore) {
       bestScore = score;
@@ -468,7 +763,17 @@ function findBestSectionShift(
     }
   }
 
-  return bestShiftMs;
+  if (bestScore === Number.NEGATIVE_INFINITY) {
+    return {
+      score: scoreGlobalOverlap(scoringPrimaryGroups, scoringSecondaryGroups, fallbackShiftMs),
+      shiftMs: fallbackShiftMs,
+    };
+  }
+
+  return {
+    score: bestScore,
+    shiftMs: bestShiftMs,
+  };
 }
 
 function buildSecondaryCueShiftsBySection(
@@ -481,23 +786,53 @@ function buildSecondaryCueShiftsBySection(
   const primarySections = splitGroupsIntoSections(primaryGroups, SECTION_GAP_MS);
   const secondarySections = splitGroupsIntoSections(secondaryGroups, SECTION_GAP_MS);
 
-  if (primarySections.length <= 1 || secondarySections.length <= 1) {
+  if (secondarySections.length <= 1) {
     return { shifts, representativeShiftMs: fallbackShiftMs };
   }
 
-  const pairedSectionCount = Math.min(primarySections.length, secondarySections.length);
   const sectionShifts: number[] = [];
   let previousSectionShiftMs = fallbackShiftMs;
 
-  for (let index = 0; index < pairedSectionCount; index += 1) {
-    const sectionShiftMs =
-      index > 0 && shouldContinueSectionShift(primaryGroups, secondarySections[index], previousSectionShiftMs)
-        ? previousSectionShiftMs
-        : findBestSectionShift(primarySections[index], secondarySections[index], fallbackShiftMs);
+  for (let index = 0; index < secondarySections.length; index += 1) {
+    const secondarySection = secondarySections[index];
+    let sectionShiftMs = previousSectionShiftMs;
+
+    if (
+      index === 0 ||
+      !shouldContinueSectionShift(primaryGroups, secondarySection, previousSectionShiftMs)
+    ) {
+      let bestSectionShift = findBestSectionShift(
+        primarySections[0] ?? primaryGroups,
+        secondarySection,
+        fallbackShiftMs,
+        index > 0 ? previousSectionShiftMs : undefined,
+      );
+
+      if (index > 0) {
+        for (
+          let primarySectionIndex = 1;
+          primarySectionIndex < primarySections.length;
+          primarySectionIndex += 1
+        ) {
+          const candidateSectionShift = findBestSectionShift(
+            primarySections[primarySectionIndex],
+            secondarySection,
+            fallbackShiftMs,
+            previousSectionShiftMs,
+          );
+          if (candidateSectionShift.score > bestSectionShift.score) {
+            bestSectionShift = candidateSectionShift;
+          }
+        }
+      }
+
+      sectionShiftMs = bestSectionShift.shiftMs;
+    }
+
     sectionShifts.push(sectionShiftMs);
     previousSectionShiftMs = sectionShiftMs;
 
-    for (const group of secondarySections[index]) {
+    for (const group of secondarySection) {
       for (const cueIndex of group.cueIndices) {
         shifts[cueIndex] = sectionShiftMs;
       }
@@ -516,12 +851,14 @@ function buildGroupSpan(groups: CueGroup[], groupStartIndex: number, spanLength:
   const segmentGroups: CueGroup[] = [];
   let totalSpeechMs = 0;
   let creditLikeScore = 0;
+  const textProfiles: TextProfile[] = [];
   for (let index = groupStartIndex; index <= groupEndIndex; index += 1) {
     const group = groups[index];
     cueIndices.push(...group.cueIndices);
     segmentGroups.push(group);
     totalSpeechMs += groupDuration(group);
     creditLikeScore += group.creditLikeScore;
+    textProfiles.push(group.textProfile);
   }
 
   return {
@@ -533,6 +870,7 @@ function buildGroupSpan(groups: CueGroup[], groupStartIndex: number, spanLength:
     endMs: groups[groupEndIndex].endMs,
     totalSpeechMs,
     creditLikeScore,
+    textProfile: combineTextProfiles(textProfiles),
   };
 }
 
@@ -565,6 +903,14 @@ function scoreSpanPair(primarySpan: GroupSpan, secondarySpan: GroupSpan): number
   const overlap = computeSpanActivityOverlap(primarySpan, secondarySpan);
   const centerDistance = Math.abs(groupCenter(primarySpan) - groupCenter(secondarySpan));
   const similarity = durationSimilarity(primarySpan.totalSpeechMs, secondarySpan.totalSpeechMs);
+  const sharedLatinWordTokenCount = countSharedTokens(
+    primarySpan.textProfile.latinWordTokens,
+    secondarySpan.textProfile.latinWordTokens,
+  );
+  const textCompatibility = scoreTextCompatibility(
+    primarySpan.textProfile,
+    secondarySpan.textProfile,
+  );
   const primaryIsCreditLike = primarySpan.creditLikeScore >= 0.8;
   const secondaryIsCreditLike = secondarySpan.creditLikeScore >= 0.8;
   const creditMismatchPenalty =
@@ -574,6 +920,13 @@ function scoreSpanPair(primarySpan: GroupSpan, secondarySpan: GroupSpan): number
     (secondarySpan.groupEndIndex - secondarySpan.groupStartIndex) * 28;
 
   if (primaryIsCreditLike !== secondaryIsCreditLike) {
+    return Number.NEGATIVE_INFINITY;
+  }
+  if (
+    primarySpan.textProfile.latinWordTokens.length >= 2 &&
+    secondarySpan.textProfile.latinWordTokens.length >= 2 &&
+    sharedLatinWordTokenCount === 0
+  ) {
     return Number.NEGATIVE_INFINITY;
   }
 
@@ -586,7 +939,8 @@ function scoreSpanPair(primarySpan: GroupSpan, secondarySpan: GroupSpan): number
     similarity * 260 -
     centerDistance * 0.14 -
     spanComplexityPenalty -
-    creditMismatchPenalty
+    creditMismatchPenalty +
+    textCompatibility
   );
 }
 
@@ -838,6 +1192,7 @@ function applyAnchorInterpolationToUnmatchedGroups(
         endMs: group.endMs,
         totalSpeechMs: groupDuration(group),
         creditLikeScore: group.creditLikeScore,
+        textProfile: group.textProfile,
       },
       targetStartMs,
       Math.max(targetEndMs, targetStartMs + 20),

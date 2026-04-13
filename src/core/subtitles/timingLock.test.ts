@@ -253,4 +253,40 @@ describe("subtitle timing lock", () => {
     expect(result.secondaryCues[4].startMs).toBe(primaryCues[5].startMs);
     expect(result.secondaryCues[5].startMs).toBe(primaryCues[6].startMs);
   });
+
+  it("keeps later sections near the established shift when the secondary splits earlier", () => {
+    const primaryCues: Cue[] = [
+      cue(1, 8000, 10000, "previously on"),
+      cue(2, 11000, 13000, "last time"),
+      cue(3, 40000, 41000, "found him"),
+      cue(4, 42000, 43000, "are you there"),
+      cue(5, 44000, 45000, "dad died"),
+      cue(6, 180000, 181000, "wrong scene a"),
+      cue(7, 182000, 183000, "wrong scene b"),
+      cue(8, 184000, 185000, "wrong scene c"),
+    ];
+    const secondaryCues: Cue[] = [
+      cue(1, 1300, 3300, "previously on secondary"),
+      cue(2, 4300, 6300, "last time secondary"),
+      cue(3, 28200, 29200, "found him secondary"),
+      cue(4, 30200, 31200, "are you there secondary"),
+      cue(5, 32200, 33200, "dad died secondary"),
+    ];
+
+    const result = buildTimingLockedCues({
+      primaryCues,
+      secondaryCues,
+      primaryOffsetMs: 0,
+      secondaryOffsetMs: 0,
+      blend: 0,
+      enabled: true,
+      groupGapMs: 180,
+    });
+
+    expect(result.secondaryCues[0].startMs).toBe(primaryCues[0].startMs);
+    expect(result.secondaryCues[1].startMs).toBe(primaryCues[1].startMs);
+    expect(result.secondaryCues[2].startMs).toBe(primaryCues[2].startMs);
+    expect(result.secondaryCues[3].startMs).toBe(primaryCues[3].startMs);
+    expect(result.secondaryCues[4].startMs).toBe(primaryCues[4].startMs);
+  });
 });
