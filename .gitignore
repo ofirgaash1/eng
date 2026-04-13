@@ -11,3 +11,10 @@ src/**/*.js.map
 package-lock.json
 eng.srt
 heb.srt
+/test-results
+/dist-extension
+/.tmp-extension-package
+1.html
+2.html
+release/subtitle-word-tracker-extension.zip
+/test-results
