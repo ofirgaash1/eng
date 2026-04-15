@@ -118,6 +118,30 @@ describe("openSubtitles helpers", () => {
     expect(pickMostDownloadedSubtitle([blockedItem, allowedItem])?.id).toBe("allowed");
   });
 
+  it("blocks FLEET releases from selection", () => {
+    const blockedItem: OpenSubtitlesItem = {
+      id: "blocked-fleet",
+      attributes: {
+        language: "en",
+        release: "Homeland.S05E02.HDTV.x264-FLEET",
+        download_count: 999,
+        files: [{ file_id: 1, file_name: "Homeland.S05E02.HDTV.x264-FLEET.[VTV]-eng.srt" }],
+      },
+    };
+    const allowedItem: OpenSubtitlesItem = {
+      id: "allowed",
+      attributes: {
+        language: "en",
+        download_count: 50,
+        files: [{ file_id: 2, file_name: "Homeland.S05E02.HDTV.x264-OTHER.srt" }],
+      },
+    };
+
+    expect(isBlockedOpenSubtitlesItem(blockedItem)).toBe(true);
+    expect(isBlockedOpenSubtitlesItem(allowedItem)).toBe(false);
+    expect(pickMostDownloadedSubtitle([blockedItem, allowedItem])?.id).toBe("allowed");
+  });
+
   it("searches every fallback query and deduplicates returned subtitles", async () => {
     const exactItem: OpenSubtitlesItem = {
       id: "exact",

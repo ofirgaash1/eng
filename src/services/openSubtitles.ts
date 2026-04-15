@@ -16,7 +16,7 @@ const OPEN_SUBTITLES_RELEASE_TAG_RE =
   /\b(?:480p|576p|720p|1080p|2160p|4k|8k|blu(?:ray)?|b[dr]rip|web(?:rip|[-\s]?dl)?|hdtv|x26[45]|h[.\s]?26[45]|hevc|avc|10bit|aac|dts|ddp?|eac3|ac3|dd5[\s.]?1|5[\s.]?1|dvdrip|hdrip|proper|repack|remux|nf|amzn|hulu|yts|rarbg|eztv|silence)\b/i;
 const OPEN_SUBTITLES_KNOWN_FILE_EXTENSION_RE =
   /\.(?:3g2|3gp|asf|avi|divx|flv|m2ts|m4v|mkv|mov|mp4|mpeg|mpg|ogm|ogv|ts|vob|webm|wmv|srt|sub|ass|ssa)$/i;
-const OPEN_SUBTITLES_BLOCKED_RELEASE_RE = /\bIMMERSE\b/i;
+const OPEN_SUBTITLES_BLOCKED_RELEASE_RE = /\b(?:IMMERSE|FLEET)\b/i;
 
 export type OpenSubtitlesFile = {
   file_id: number;
