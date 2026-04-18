@@ -60,6 +60,16 @@ function applyStemAnalysis(words: UnknownWord[]) {
   return { next, changed };
 }
 
+const classLookupCache: {
+  wordsRef: UnknownWord[] | null;
+  exact: Set<string>;
+  variants: Set<string>;
+} = {
+  wordsRef: null,
+  exact: new Set<string>(),
+  variants: new Set<string>(),
+};
+
 export const useDictionaryStore = create<DictionaryState>((set, get) => ({
   words: [],
   candidateWords: [],
@@ -203,12 +213,16 @@ export const useDictionaryStore = create<DictionaryState>((set, get) => ({
     await replaceAllWords(sorted);
   },
   classForToken: (token) => {
-    const exact = new Set(get().words.map((word) => word.normalized));
-    const variants = new Set(get().words.map((word) => word.stem));
-    if (exact.has(token.normalized)) {
+    const state = get();
+    if (classLookupCache.wordsRef !== state.words) {
+      classLookupCache.wordsRef = state.words;
+      classLookupCache.exact = new Set(state.words.map((word) => word.normalized));
+      classLookupCache.variants = new Set(state.words.map((word) => word.stem));
+    }
+    if (classLookupCache.exact.has(token.normalized)) {
       return "hl-exact text-white";
     }
-    if (variants.has(token.stem)) {
+    if (classLookupCache.variants.has(token.stem)) {
       return "hl-variant text-white";
     }
     return "bg-transparent";

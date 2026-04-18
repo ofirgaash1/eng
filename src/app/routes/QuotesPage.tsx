@@ -11,7 +11,6 @@ import { useDictionaryStore } from "../../state/dictionaryStore";
 import { usePrefsStore } from "../../state/prefsStore";
 import { listSubtitleFiles, upsertSubtitleFile, deleteSubtitleFile } from "../../data/filesRepo";
 import { getCuesForFile, saveCuesForFile } from "../../data/cuesRepo";
-import { rebuildInboxFromStoredSubtitleFiles } from "../../data/inboxRepo";
 import { hashBlob, readSubtitleText } from "../../utils/file";
 import { tokenize } from "../../core/nlp/tokenize";
 import { parseSrt } from "../../core/parsing/srtParser";
@@ -431,7 +430,6 @@ export default function QuotesPage() {
           }
         }
         if (importedCount > 0) {
-          await rebuildInboxFromStoredSubtitleFiles();
           await refreshCandidateWords();
         }
         await refreshLibrary();
