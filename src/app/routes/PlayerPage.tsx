@@ -19,12 +19,11 @@ import { formatTimeMs } from "../../utils/timeFormat";
 import { hashBlob, readSubtitleText } from "../../utils/file";
 import { upsertSubtitleFile } from "../../data/filesRepo";
 import { getCuesForFile, saveCuesForFile } from "../../data/cuesRepo";
-import { rebuildInboxFromStoredSubtitleFiles } from "../../data/inboxRepo";
 import { getLastSession, saveLastSession } from "../../data/sessionRepo";
 import { parseSrt } from "../../core/parsing/srtParser";
 import {
-  buildTimingLockedCuesFromPrepared,
-  prepareTimingLock,
+  buildTimingLockedCues,
+  type TimingLockResult,
 } from "../../core/subtitles/timingLock";
 import {
   buildPrefixedSubtitleFileName,
@@ -45,9 +44,26 @@ import {
   translateEnglishWordToHebrew,
 } from "../../services/googleTranslate";
 
-type WorkerResponse = {
+type ParseWorkerResponse = {
   id: string;
   cues: Cue[];
+  error?: string;
+};
+type TimingLockWorkerRequest = {
+  id: string;
+  options: {
+    primaryCues: Cue[];
+    secondaryCues: Cue[];
+    primaryOffsetMs: number;
+    secondaryOffsetMs: number;
+    blend: number;
+    enabled: boolean;
+    groupGapMs?: number;
+  };
+};
+type TimingLockWorkerResponse = {
+  id: string;
+  result?: TimingLockResult;
   error?: string;
 };
 type SubtitleTimingLockMode = "primary" | "blend" | "secondary";
@@ -58,6 +74,7 @@ const INVALID_SUBTITLE_MESSAGE = "No valid subtitle cues found. Use a valid .srt
 const QUICK_SUBTITLE_GAP_MS = 350;
 const TIMING_LOCK_GROUP_GAP_MS = 180;
 const TIMING_LOCK_BLEND_INTERIOR_MIN = 0.05;
+const LIBRARY_SCAN_YIELD_EVERY = 250;
 // layering markers: pointer-events-none flex flex-wrap | pointer-events-auto relative z-50
 
 function detectRtlFromCues(cues: Cue[]): boolean {
@@ -85,8 +102,72 @@ function shiftCueList(cues: Cue[], offsetMs: number): Cue[] {
   }));
 }
 
+function findFirstCueIndexByEndAtOrAfter(cues: Cue[], timeMs: number): number {
+  let left = 0;
+  let right = cues.length;
+  while (left < right) {
+    const middle = (left + right) >> 1;
+    if (cues[middle].endMs < timeMs) {
+      left = middle + 1;
+    } else {
+      right = middle;
+    }
+  }
+  return left;
+}
+
+function findFirstCueIndexByStartAfter(cues: Cue[], timeMs: number): number {
+  let left = 0;
+  let right = cues.length;
+  while (left < right) {
+    const middle = (left + right) >> 1;
+    if (cues[middle].startMs <= timeMs) {
+      left = middle + 1;
+    } else {
+      right = middle;
+    }
+  }
+  return left;
+}
+
+function findActiveCuesAtTime(cues: Cue[], timeMs: number): Cue[] {
+  if (cues.length === 0) {
+    return [];
+  }
+  const firstPossibleIndex = findFirstCueIndexByEndAtOrAfter(cues, timeMs);
+  if (firstPossibleIndex >= cues.length) {
+    return [];
+  }
+  const active: Cue[] = [];
+  for (let index = firstPossibleIndex; index < cues.length; index += 1) {
+    const cue = cues[index];
+    if (cue.startMs > timeMs) {
+      break;
+    }
+    if (cue.endMs >= timeMs) {
+      active.push(cue);
+    }
+  }
+  return active;
+}
+
+function compactCuesForTimingLock(cues: Cue[]): Cue[] {
+  return cues.map(({ index, startMs, endMs, rawText }) => ({
+    index,
+    startMs,
+    endMs,
+    rawText,
+  }));
+}
+
 function formatSignedSeconds(valueMs: number, fractionDigits = 2) {
   return `${valueMs >= 0 ? "+" : ""}${(valueMs / 1000).toFixed(fractionDigits)}s`;
+}
+
+function resolveTimingLockReferenceTrack(blend: number): TimingLockResult["referenceTrack"] {
+  if (blend <= 0) return "primary";
+  if (blend >= 1) return "secondary";
+  return "blend";
 }
 
 function isSubtitleTimingLockMode(value: unknown): value is SubtitleTimingLockMode {
@@ -159,7 +240,9 @@ export { SubtitleCue, SubtitleCueBackground };
 export default function PlayerPage({ isActive = true }: { isActive?: boolean }) {
   const playerContainerRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const workerRef = useRef<Worker | null>(null);
+  const parseWorkerRef = useRef<Worker | null>(null);
+  const timingLockWorkerRef = useRef<Worker | null>(null);
+  const latestTimingLockRequestIdRef = useRef<string | null>(null);
   const pendingParseRef = useRef<
     Map<
       string,
@@ -199,6 +282,8 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
   const [secondarySubtitleError, setSecondarySubtitleError] = useState<string | null>(null);
   const [secondarySubtitleEnabled, setSecondarySubtitleEnabled] = useState<boolean>(false);
   const [isSecondarySubtitleRtl, setIsSecondarySubtitleRtl] = useState<boolean>(false);
+  const [timingLockWorkerResult, setTimingLockWorkerResult] = useState<TimingLockResult | null>(null);
+  const [timingLockWorkerBusy, setTimingLockWorkerBusy] = useState<boolean>(false);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [isMuted, setIsMuted] = useState<boolean>(false);
@@ -217,6 +302,10 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
   const hideCursorTimeoutRef = useRef<number | null>(null);
   const volumeOverlayTimeoutRef = useRef<number | null>(null);
   const quickSubtitleTimeoutRef = useRef<number | null>(null);
+  const stalledVideoRetryRef = useRef<{ blob: Blob | null; attempts: number }>({
+    blob: null,
+    attempts: 0,
+  });
   const lastVideoTimeSavedRef = useRef<number>(0);
   const restoreAttemptedRef = useRef<boolean>(false);
   const addWord = useDictionaryStore((state) => state.addUnknownWordFromToken);
@@ -299,7 +388,6 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
   );
 
   const rebuildInboxAfterSubtitleImport = useCallback(async () => {
-    await rebuildInboxFromStoredSubtitleFiles();
     await refreshCandidateWords();
   }, [refreshCandidateWords]);
 
@@ -462,18 +550,18 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
     const worker = new Worker(new URL("../../workers/srtWorker.ts", import.meta.url), {
       type: "module",
     });
-    workerRef.current = worker;
+    parseWorkerRef.current = worker;
     return () => {
       worker.terminate();
-      workerRef.current = null;
+      parseWorkerRef.current = null;
     };
   }, []);
 
   useEffect(() => {
-    const worker = workerRef.current;
+    const worker = parseWorkerRef.current;
     if (!worker) return;
 
-    const handleMessage = async (event: MessageEvent<WorkerResponse>) => {
+    const handleMessage = async (event: MessageEvent<ParseWorkerResponse>) => {
       const pending = pendingParseRef.current.get(event.data.id);
       if (!pending) return;
       if (latestParseRef.current[pending.target] !== event.data.id) {
@@ -498,9 +586,20 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
           setSecondarySubtitleError(null);
           await applyParsedSecondaryCues(pending.hash, pending.fileName, event.data.cues);
           setSecondarySubtitleEnabled(true);
+          void saveLastSession({
+            secondarySubtitleName: pending.fileName,
+            secondarySubtitleHash: pending.hash,
+            secondarySubtitleText: undefined,
+            secondarySubtitleEnabled: true,
+          });
         } else {
           setSubtitleError(null);
           await applyParsedCues(pending.hash, pending.fileName, event.data.cues);
+          void saveLastSession({
+            subtitleName: pending.fileName,
+            subtitleHash: pending.hash,
+            subtitleText: undefined,
+          });
         }
         if (pending.rebuildInbox) {
           await rebuildInboxAfterSubtitleImport();
@@ -534,6 +633,35 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
     applySecondaryCuesState,
     rebuildInboxAfterSubtitleImport,
   ]);
+
+  useEffect(() => {
+    const worker = new Worker(new URL("../../workers/timingLockWorker.ts", import.meta.url), {
+      type: "module",
+    });
+    timingLockWorkerRef.current = worker;
+
+    const handleMessage = (event: MessageEvent<TimingLockWorkerResponse>) => {
+      if (latestTimingLockRequestIdRef.current !== event.data.id) {
+        return;
+      }
+      setTimingLockWorkerBusy(false);
+      if (event.data.error) {
+        setTimingLockWorkerResult(null);
+        return;
+      }
+      if (event.data.result) {
+        setTimingLockWorkerResult(event.data.result);
+      }
+    };
+
+    worker.addEventListener("message", handleMessage);
+    return () => {
+      worker.removeEventListener("message", handleMessage);
+      worker.terminate();
+      timingLockWorkerRef.current = null;
+      latestTimingLockRequestIdRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -576,13 +704,21 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
   }, [mediaLibrary]);
 
   const findVideoHandleByName = useCallback(
-    async (fileName: string): Promise<FileSystemFileHandle | null> => {
+    async (
+      fileName: string,
+      options?: { signal?: AbortSignal },
+    ): Promise<FileSystemFileHandle | null> => {
+      if (options?.signal?.aborted) return null;
       const handle = await ensureLibraryAccess();
-      if (!handle) return null;
+      if (!handle || options?.signal?.aborted) return null;
       const target = fileName.toLowerCase();
       const queue: FileSystemDirectoryHandle[] = [handle];
+      let processedEntries = 0;
 
       while (queue.length > 0) {
+        if (options?.signal?.aborted) {
+          return null;
+        }
         const current = queue.shift();
         if (!current) continue;
         const iterator = (current as FileSystemDirectoryHandle & {
@@ -590,12 +726,21 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
         }).values;
         if (!iterator) continue;
         for await (const entry of iterator.call(current)) {
+          if (options?.signal?.aborted) {
+            return null;
+          }
           if (entry.kind === "file") {
             if (entry.name.toLowerCase() === target) {
               return entry as FileSystemFileHandle;
             }
           } else if (entry.kind === "directory") {
             queue.push(entry as FileSystemDirectoryHandle);
+          }
+          processedEntries += 1;
+          if (processedEntries % LIBRARY_SCAN_YIELD_EVERY === 0) {
+            await new Promise<void>((resolve) => {
+              window.setTimeout(resolve, 0);
+            });
           }
         }
       }
@@ -675,7 +820,7 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
         if (!restoredSecondaryFromCache && session.secondarySubtitleText) {
           setSecondarySubtitleLoading(true);
           setSecondarySubtitleError(null);
-          const worker = workerRef.current;
+          const worker = parseWorkerRef.current;
           if (worker) {
             const requestId = crypto.randomUUID();
             pendingParseRef.current.set(requestId, {
@@ -724,7 +869,7 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
         if (!restoredPrimaryFromCache && session.subtitleText) {
           setSubtitleLoading(true);
           setSubtitleError(null);
-          const worker = workerRef.current;
+          const worker = parseWorkerRef.current;
           if (worker) {
             const requestId = crypto.randomUUID();
             pendingParseRef.current.set(requestId, {
@@ -779,17 +924,23 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
     if (!pendingVideoName || videoUrl || restoreAttemptedRef.current) return;
     restoreAttemptedRef.current = true;
     let cancelled = false;
+    const abortController = new AbortController();
 
     const restoreVideo = async () => {
       try {
-        const handle = await findVideoHandleByName(pendingVideoName);
+        const handle = await findVideoHandleByName(pendingVideoName, {
+          signal: abortController.signal,
+        });
         if (cancelled) return;
         if (handle) {
           const file = await handle.getFile();
           if (!cancelled) {
             setVideoFromFile(file);
+            setPendingVideoName(null);
           }
+          return;
         }
+        setPendingVideoName(null);
       } catch {
         // Ignore media library restore failures.
       }
@@ -799,6 +950,7 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
 
     return () => {
       cancelled = true;
+      abortController.abort();
     };
   }, [findVideoHandleByName, pendingVideoName, prefsInitialized, setVideoFromFile, videoUrl]);
 
@@ -825,13 +977,24 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
 
   useEffect(() => {
     if (!videoBlob || !videoUrl || !videoName) return;
+    if (stalledVideoRetryRef.current.blob !== videoBlob) {
+      stalledVideoRetryRef.current = { blob: videoBlob, attempts: 0 };
+    }
     let cancelled = false;
     const timeout = window.setTimeout(() => {
       if (cancelled) return;
       const video = videoRef.current;
-      if (video && video.readyState === 0) {
-        setVideoFromBlob(videoName, videoBlob);
+      if (!video || video.readyState !== 0) {
+        return;
       }
+      if (video.error || video.networkState === HTMLMediaElement.NETWORK_NO_SOURCE) {
+        return;
+      }
+      if (stalledVideoRetryRef.current.attempts >= 1) {
+        return;
+      }
+      stalledVideoRetryRef.current.attempts += 1;
+      setVideoFromBlob(videoName, videoBlob);
     }, 800);
     return () => {
       cancelled = true;
@@ -1012,7 +1175,7 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
           subtitleHash: hash,
         });
 
-        const worker = workerRef.current;
+        const worker = parseWorkerRef.current;
         if (worker) {
           const requestId = crypto.randomUUID();
           pendingParseRef.current.set(requestId, {
@@ -1032,6 +1195,11 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
           tokens: cue.tokens ?? tokenize(cue.rawText),
         }));
         await applyParsedCues(hash, file.name, parsed);
+        void saveLastSession({
+          subtitleName: file.name,
+          subtitleHash: hash,
+          subtitleText: undefined,
+        });
         if (shouldRebuildInbox) {
           await rebuildInboxAfterSubtitleImport();
         }
@@ -1081,7 +1249,7 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
           secondarySubtitleEnabled: true,
         });
 
-        const worker = workerRef.current;
+        const worker = parseWorkerRef.current;
         if (worker) {
           const requestId = crypto.randomUUID();
           pendingParseRef.current.set(requestId, {
@@ -1102,6 +1270,12 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
         }));
         await applyParsedSecondaryCues(hash, file.name, parsed);
         setSecondarySubtitleEnabled(true);
+        void saveLastSession({
+          secondarySubtitleName: file.name,
+          secondarySubtitleHash: hash,
+          secondarySubtitleText: undefined,
+          secondarySubtitleEnabled: true,
+        });
         if (shouldRebuildInbox) {
           await rebuildInboxAfterSubtitleImport();
         }
@@ -1200,6 +1374,7 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
         await processSubtitleFile(matchingSubtitle);
       }
 
+      setPendingVideoName(null);
       event.target.value = "";
     },
     [processSubtitleFile, resetPlayback, scheduleQuickSubtitleDownloadHint],
@@ -1245,6 +1420,7 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
     setQuickSubtitleStatus("Searching top English subtitle…");
 
     const outcomes: string[] = [];
+    let shouldRefreshCandidates = false;
 
     try {
       const englishResult = await downloadBestSubtitleForLanguage("en");
@@ -1264,7 +1440,8 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
         const englishFile = new File([englishResult.blob], fallbackName, {
           type: "application/x-subrip",
         });
-        const loaded = await processSubtitleFile(englishFile);
+        const loaded = await processSubtitleFile(englishFile, { rebuildInbox: false });
+        shouldRefreshCandidates = shouldRefreshCandidates || loaded;
         if (loaded) {
           outcomes.push(`English saved as ${fallbackName} and loaded into subtitle 1`);
         } else {
@@ -1280,7 +1457,8 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
         const hebrewFile = new File([hebrewResult.blob], fallbackName, {
           type: "application/x-subrip",
         });
-        const loaded = await processSecondarySubtitleFile(hebrewFile);
+        const loaded = await processSecondarySubtitleFile(hebrewFile, { rebuildInbox: false });
+        shouldRefreshCandidates = shouldRefreshCandidates || loaded;
         if (loaded) {
           outcomes.push(`Hebrew saved as ${fallbackName} and loaded into subtitle 2`);
         } else {
@@ -1290,6 +1468,9 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
         outcomes.push("No Hebrew subtitle found");
       }
 
+      if (shouldRefreshCandidates) {
+        await rebuildInboxAfterSubtitleImport();
+      }
       setQuickSubtitleStatus(outcomes.join(". "));
     } catch (error) {
       setQuickSubtitleStatus(null);
@@ -1301,6 +1482,7 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
     }
   }, [
     downloadBestSubtitleForLanguage,
+    rebuildInboxAfterSubtitleImport,
     processSecondarySubtitleFile,
     processSubtitleFile,
     videoName,
@@ -1332,25 +1514,79 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
     [subtitleTimingLockBlend, subtitleTimingLockMode],
   );
   const deferredSubtitleTimingLockBlend = useDeferredValue(subtitleTimingLockComputedBlend);
-  const timingLockPrepared = useMemo(
-    () =>
-      prepareTimingLock({
-        primaryCues: cues,
-        secondaryCues,
+  const timingLockPrimaryCuesForWorker = useMemo(() => compactCuesForTimingLock(cues), [cues]);
+  const timingLockSecondaryCuesForWorker = useMemo(
+    () => compactCuesForTimingLock(secondaryCues),
+    [secondaryCues],
+  );
+  const inactiveTimingLockResult = useMemo<TimingLockResult>(
+    () => ({
+      primaryCues: shiftCueList(cues, subtitleOffsetMs),
+      secondaryCues: shiftCueList(secondaryCues, secondarySubtitleOffsetMs),
+      autoSecondaryShiftMs: 0,
+      matchedGroupCount: 0,
+      matchedSectionCount: 0,
+      matchedPrimaryGroupCount: 0,
+      matchedSecondaryGroupCount: 0,
+      primaryGroupCount: 0,
+      secondaryGroupCount: 0,
+      referenceTrack: resolveTimingLockReferenceTrack(deferredSubtitleTimingLockBlend),
+      active: false,
+    }),
+    [cues, deferredSubtitleTimingLockBlend, secondaryCues, secondarySubtitleOffsetMs, subtitleOffsetMs],
+  );
+
+  useEffect(() => {
+    if (!timingLockActive) {
+      latestTimingLockRequestIdRef.current = null;
+      setTimingLockWorkerBusy(false);
+      setTimingLockWorkerResult(null);
+      return;
+    }
+
+    const requestId = crypto.randomUUID();
+    latestTimingLockRequestIdRef.current = requestId;
+    const request: TimingLockWorkerRequest = {
+      id: requestId,
+      options: {
+        primaryCues: timingLockPrimaryCuesForWorker,
+        secondaryCues: timingLockSecondaryCuesForWorker,
         primaryOffsetMs: subtitleOffsetMs,
         secondaryOffsetMs: secondarySubtitleOffsetMs,
-        enabled: timingLockActive,
+        blend: deferredSubtitleTimingLockBlend,
+        enabled: true,
         groupGapMs: TIMING_LOCK_GROUP_GAP_MS,
-      }),
-    [cues, secondaryCues, secondarySubtitleOffsetMs, subtitleOffsetMs, timingLockActive],
-  );
-  const timingLockResult = useMemo(
-    () => buildTimingLockedCuesFromPrepared(timingLockPrepared, deferredSubtitleTimingLockBlend),
-    [deferredSubtitleTimingLockBlend, timingLockPrepared],
-  );
+      },
+    };
+
+    const worker = timingLockWorkerRef.current;
+    if (!worker) {
+      try {
+        setTimingLockWorkerResult(buildTimingLockedCues(request.options));
+      } catch {
+        setTimingLockWorkerResult(null);
+      }
+      setTimingLockWorkerBusy(false);
+      return;
+    }
+
+    setTimingLockWorkerBusy(true);
+    worker.postMessage(request);
+  }, [
+    deferredSubtitleTimingLockBlend,
+    secondarySubtitleOffsetMs,
+    subtitleOffsetMs,
+    timingLockActive,
+    timingLockPrimaryCuesForWorker,
+    timingLockSecondaryCuesForWorker,
+  ]);
+
+  const timingLockResult =
+    timingLockActive && timingLockWorkerResult ? timingLockWorkerResult : inactiveTimingLockResult;
   const timingBlendPending =
-    subtitleTimingLockMode === "blend" &&
-    Math.abs(deferredSubtitleTimingLockBlend - subtitleTimingLockComputedBlend) > 0.001;
+    (subtitleTimingLockMode === "blend" &&
+      Math.abs(deferredSubtitleTimingLockBlend - subtitleTimingLockComputedBlend) > 0.001) ||
+    (timingLockActive && timingLockWorkerBusy);
   const activeLockedPairOffsetMs = timingLockResult.active ? subtitleTimingLockPairOffsetMs : 0;
   const timingLockStatusText = useMemo(() => {
     if (!timingLockResult.active) {
@@ -1384,18 +1620,12 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
   );
 
   const activeCues = useMemo(
-    () =>
-      effectivePrimaryCues.filter((cue) => {
-        return cue.startMs <= currentTimeMs && cue.endMs >= currentTimeMs;
-      }),
+    () => findActiveCuesAtTime(effectivePrimaryCues, currentTimeMs),
     [currentTimeMs, effectivePrimaryCues],
   );
 
   const activeSecondaryCues = useMemo(
-    () =>
-      effectiveSecondaryCues.filter((cue) => {
-        return cue.startMs <= currentTimeMs && cue.endMs >= currentTimeMs;
-      }),
+    () => findActiveCuesAtTime(effectiveSecondaryCues, currentTimeMs),
     [currentTimeMs, effectiveSecondaryCues],
   );
 
@@ -1411,45 +1641,45 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
 
   const findNextCueStartMs = useCallback(
     (timeMs: number) => {
-      for (const cue of effectivePrimaryCues) {
-        if (cue.startMs > timeMs + 50) {
-          return Math.max(0, cue.startMs);
-        }
+      const nextIndex = findFirstCueIndexByStartAfter(effectivePrimaryCues, timeMs + 50);
+      if (nextIndex >= effectivePrimaryCues.length) {
+        return null;
       }
-      return null;
+      return Math.max(0, effectivePrimaryCues[nextIndex].startMs);
     },
     [effectivePrimaryCues],
   );
 
   const findPreviousCueStartMs = useCallback(
     (timeMs: number) => {
-      for (let index = effectivePrimaryCues.length - 1; index >= 0; index -= 1) {
-        const cue = effectivePrimaryCues[index];
-        if (cue.startMs < timeMs - 50) {
-          return Math.max(0, cue.startMs);
-        }
+      const nextIndex = findFirstCueIndexByStartAfter(effectivePrimaryCues, timeMs - 50);
+      const previousIndex = nextIndex - 1;
+      if (previousIndex < 0) {
+        return null;
       }
-      return null;
+      return Math.max(0, effectivePrimaryCues[previousIndex].startMs);
     },
     [effectivePrimaryCues],
   );
 
   const findGapJumpTargetMs = useCallback(
     (timeMs: number) => {
-      let previousEnd: number | null = null;
-      for (const cue of effectivePrimaryCues) {
-        if (timeMs >= cue.startMs && timeMs <= cue.endMs) {
-          return null;
-        }
-        if (cue.startMs > timeMs) {
-          if (previousEnd === null) {
-            return cue.startMs - timeMs > 150 ? Math.max(0, cue.startMs) : null;
-          }
-          return timeMs - previousEnd > 150 ? Math.max(0, cue.startMs) : null;
-        }
-        previousEnd = cue.endMs;
+      if (effectivePrimaryCues.length === 0) {
+        return null;
       }
-      return null;
+      if (findActiveCuesAtTime(effectivePrimaryCues, timeMs).length > 0) {
+        return null;
+      }
+      const nextIndex = findFirstCueIndexByStartAfter(effectivePrimaryCues, timeMs);
+      const previousCue = nextIndex > 0 ? effectivePrimaryCues[nextIndex - 1] : null;
+      const nextCue = nextIndex < effectivePrimaryCues.length ? effectivePrimaryCues[nextIndex] : null;
+      if (!nextCue) {
+        return null;
+      }
+      if (!previousCue) {
+        return nextCue.startMs - timeMs > 150 ? Math.max(0, nextCue.startMs) : null;
+      }
+      return timeMs - previousCue.endMs > 150 ? Math.max(0, nextCue.startMs) : null;
     },
     [effectivePrimaryCues],
   );

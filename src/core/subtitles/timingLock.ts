@@ -170,6 +170,8 @@ function scoreCueCreditLike(text: string): number {
   return score;
 }
 
+const textProfileCache = new Map<string, TextProfile>();
+
 function parseTextProfile(text: string): TextProfile {
   const compact = stripMarkup(text);
   const lines = compact
@@ -234,6 +236,30 @@ function parseTextProfile(text: string): TextProfile {
     parentheticalLineCount,
     musicLineCount,
   };
+}
+
+function getTextProfile(text: string): TextProfile {
+  const cached = textProfileCache.get(text);
+  if (cached) {
+    return cached;
+  }
+  const profile = parseTextProfile(text);
+  textProfileCache.set(text, profile);
+  return profile;
+}
+
+function isCueOrderSorted(cues: Cue[]): boolean {
+  for (let index = 1; index < cues.length; index += 1) {
+    const previous = cues[index - 1];
+    const current = cues[index];
+    if (current.startMs < previous.startMs) {
+      return false;
+    }
+    if (current.startMs === previous.startMs && current.endMs < previous.endMs) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function combineTextProfiles(profiles: TextProfile[]): TextProfile {
@@ -414,14 +440,16 @@ function buildCueGroups(cues: Cue[], groupGapMs: number): CueGroup[] {
     return [];
   }
 
-  const orderedCues = cues
-    .map((cue, index) => ({ cue, originalIndex: index }))
-    .sort(
-      (left, right) =>
-        left.cue.startMs - right.cue.startMs ||
-        left.cue.endMs - right.cue.endMs ||
-        left.originalIndex - right.originalIndex,
-    );
+  const orderedCues = isCueOrderSorted(cues)
+    ? cues.map((cue, index) => ({ cue, originalIndex: index }))
+    : cues
+        .map((cue, index) => ({ cue, originalIndex: index }))
+        .sort(
+          (left, right) =>
+            left.cue.startMs - right.cue.startMs ||
+            left.cue.endMs - right.cue.endMs ||
+            left.originalIndex - right.originalIndex,
+        );
   const groups: CueGroup[] = [];
   const firstCue = orderedCues[0];
   let current: CueGroup = {
@@ -430,7 +458,7 @@ function buildCueGroups(cues: Cue[], groupGapMs: number): CueGroup[] {
     endMs: firstCue.cue.endMs,
     rawText: firstCue.cue.rawText,
     creditLikeScore: scoreCueCreditLike(firstCue.cue.rawText),
-    textProfile: parseTextProfile(firstCue.cue.rawText),
+    textProfile: getTextProfile(firstCue.cue.rawText),
   };
 
   for (let index = 1; index < orderedCues.length; index += 1) {
@@ -448,7 +476,7 @@ function buildCueGroups(cues: Cue[], groupGapMs: number): CueGroup[] {
       current.endMs = Math.max(current.endMs, cue.endMs);
       current.rawText = `${current.rawText}\n${cue.rawText}`;
       current.creditLikeScore += scoreCueCreditLike(cue.rawText);
-      current.textProfile = combineTextProfiles([current.textProfile, parseTextProfile(cue.rawText)]);
+      current.textProfile = combineTextProfiles([current.textProfile, getTextProfile(cue.rawText)]);
       continue;
     }
 
@@ -459,7 +487,7 @@ function buildCueGroups(cues: Cue[], groupGapMs: number): CueGroup[] {
       endMs: cue.endMs,
       rawText: cue.rawText,
       creditLikeScore: scoreCueCreditLike(cue.rawText),
-      textProfile: parseTextProfile(cue.rawText),
+      textProfile: getTextProfile(cue.rawText),
     };
   }
 
