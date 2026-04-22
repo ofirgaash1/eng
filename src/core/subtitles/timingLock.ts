@@ -82,6 +82,7 @@ type TextProfile = {
   exclamationCount: number;
   ellipsisCount: number;
   colonCount: number;
+  commaCount: number;
   dialogueLineCount: number;
   speakerLabelCount: number;
   parentheticalLineCount: number;
@@ -100,6 +101,7 @@ const OFFSET_FINE_RANGE_MS = 500;
 const MATCH_SCORE_THRESHOLD = 120;
 const GROUP_SKIP_PENALTY = 90;
 const MAX_MATCH_SPAN = 3;
+const BOUNDARY_REFINEMENT_SCORE_TOLERANCE = 700;
 const MAX_GROUP_DURATION_MS = 2800;
 const MAX_GROUP_CUE_COUNT = 3;
 const SECTION_GAP_MS = 20_000;
@@ -192,6 +194,7 @@ function parseTextProfile(text: string): TextProfile {
   let exclamationCount = 0;
   let ellipsisCount = 0;
   let colonCount = 0;
+  let commaCount = 0;
   let dialogueLineCount = 0;
   let speakerLabelCount = 0;
   let parentheticalLineCount = 0;
@@ -202,6 +205,7 @@ function parseTextProfile(text: string): TextProfile {
     exclamationCount += (line.match(/!/g) ?? []).length;
     ellipsisCount += (line.match(/\.{3,}|…/g) ?? []).length;
     colonCount += (line.match(/:/g) ?? []).length;
+    commaCount += (line.match(/,/g) ?? []).length;
     if (DIALOGUE_LINE_RE.test(line)) {
       dialogueLineCount += 1;
     }
@@ -231,6 +235,7 @@ function parseTextProfile(text: string): TextProfile {
     exclamationCount,
     ellipsisCount,
     colonCount,
+    commaCount,
     dialogueLineCount,
     speakerLabelCount,
     parentheticalLineCount,
@@ -272,6 +277,7 @@ function combineTextProfiles(profiles: TextProfile[]): TextProfile {
   let exclamationCount = 0;
   let ellipsisCount = 0;
   let colonCount = 0;
+  let commaCount = 0;
   let dialogueLineCount = 0;
   let speakerLabelCount = 0;
   let parentheticalLineCount = 0;
@@ -290,6 +296,7 @@ function combineTextProfiles(profiles: TextProfile[]): TextProfile {
     exclamationCount += profile.exclamationCount;
     ellipsisCount += profile.ellipsisCount;
     colonCount += profile.colonCount;
+    commaCount += profile.commaCount;
     dialogueLineCount += profile.dialogueLineCount;
     speakerLabelCount += profile.speakerLabelCount;
     parentheticalLineCount += profile.parentheticalLineCount;
@@ -309,6 +316,7 @@ function combineTextProfiles(profiles: TextProfile[]): TextProfile {
     exclamationCount,
     ellipsisCount,
     colonCount,
+    commaCount,
     dialogueLineCount,
     speakerLabelCount,
     parentheticalLineCount,
@@ -376,6 +384,7 @@ function scoreTextCompatibility(primaryProfile: TextProfile, secondaryProfile: T
   const musicSimilarity = countSimilarity(primaryProfile.musicLineCount, secondaryProfile.musicLineCount);
   const ellipsisSimilarity = countSimilarity(primaryProfile.ellipsisCount, secondaryProfile.ellipsisCount);
   const colonSimilarity = countSimilarity(primaryProfile.colonCount, secondaryProfile.colonCount);
+  const commaSimilarity = countSimilarity(primaryProfile.commaCount, secondaryProfile.commaCount);
   const primaryHasDigits = primaryProfile.digitTokens.length > 0;
   const secondaryHasDigits = secondaryProfile.digitTokens.length > 0;
   const sharedWordTokenCount = countSharedTokens(primaryProfile.wordTokens, secondaryProfile.wordTokens);
@@ -394,7 +403,8 @@ function scoreTextCompatibility(primaryProfile: TextProfile, secondaryProfile: T
     parentheticalSimilarity * 30 +
     musicSimilarity * 65 +
     ellipsisSimilarity * 20 +
-    colonSimilarity * 15;
+    colonSimilarity * 15 +
+    commaSimilarity * 18;
 
   if (sharedWordTokenCount > 0) {
     score += Math.min(180, sharedWordTokenCount * 60);
@@ -931,6 +941,9 @@ function scoreSpanPair(primarySpan: GroupSpan, secondarySpan: GroupSpan): number
   const overlap = computeSpanActivityOverlap(primarySpan, secondarySpan);
   const centerDistance = Math.abs(groupCenter(primarySpan) - groupCenter(secondarySpan));
   const similarity = durationSimilarity(primarySpan.totalSpeechMs, secondarySpan.totalSpeechMs);
+  const primaryCueCount = primarySpan.cueIndices.length;
+  const secondaryCueCount = secondarySpan.cueIndices.length;
+  const cueCountGap = Math.abs(primaryCueCount - secondaryCueCount);
   const sharedLatinWordTokenCount = countSharedTokens(
     primarySpan.textProfile.latinWordTokens,
     secondarySpan.textProfile.latinWordTokens,
@@ -946,6 +959,7 @@ function scoreSpanPair(primarySpan: GroupSpan, secondarySpan: GroupSpan): number
   const spanComplexityPenalty =
     (primarySpan.groupEndIndex - primarySpan.groupStartIndex) * 28 +
     (secondarySpan.groupEndIndex - secondarySpan.groupStartIndex) * 28;
+  const cueCountPenalty = cueCountGap * 120 + (cueCountGap > 1 ? (cueCountGap - 1) * 220 : 0);
 
   if (primaryIsCreditLike !== secondaryIsCreditLike) {
     return Number.NEGATIVE_INFINITY;
@@ -955,6 +969,9 @@ function scoreSpanPair(primarySpan: GroupSpan, secondarySpan: GroupSpan): number
     secondarySpan.textProfile.latinWordTokens.length >= 2 &&
     sharedLatinWordTokenCount === 0
   ) {
+    return Number.NEGATIVE_INFINITY;
+  }
+  if (cueCountGap >= 2 && (primaryCueCount === 1 || secondaryCueCount === 1)) {
     return Number.NEGATIVE_INFINITY;
   }
 
@@ -968,6 +985,7 @@ function scoreSpanPair(primarySpan: GroupSpan, secondarySpan: GroupSpan): number
     centerDistance * 0.14 -
     spanComplexityPenalty -
     creditMismatchPenalty +
+    -cueCountPenalty +
     textCompatibility
   );
 }
@@ -1083,6 +1101,95 @@ function alignGroups(primaryGroups: CueGroup[], secondaryGroups: CueGroup[]): Sp
 
   matches.reverse();
   return matches;
+}
+
+function refineAdjacentMatchBoundaries(
+  matches: SpanMatch[],
+  primaryGroups: CueGroup[],
+  secondaryGroups: CueGroup[],
+): SpanMatch[] {
+  if (matches.length < 2) {
+    return matches;
+  }
+
+  const refined = matches.map((match) => ({
+    primarySpan: match.primarySpan,
+    secondarySpan: match.secondarySpan,
+  }));
+
+  for (let index = 0; index < refined.length - 1; index += 1) {
+    const leftMatch = refined[index];
+    const rightMatch = refined[index + 1];
+    if (
+      leftMatch.primarySpan.groupEndIndex + 1 !== rightMatch.primarySpan.groupStartIndex ||
+      leftMatch.secondarySpan.groupEndIndex + 1 !== rightMatch.secondarySpan.groupStartIndex
+    ) {
+      continue;
+    }
+
+    const leftPrimarySpanLength =
+      leftMatch.primarySpan.groupEndIndex - leftMatch.primarySpan.groupStartIndex + 1;
+    const rightPrimarySpanLength =
+      rightMatch.primarySpan.groupEndIndex - rightMatch.primarySpan.groupStartIndex + 1;
+    if (leftPrimarySpanLength <= 1 || rightPrimarySpanLength >= MAX_MATCH_SPAN) {
+      continue;
+    }
+
+    const movedPrimaryGroup = primaryGroups[leftMatch.primarySpan.groupEndIndex];
+    const rightPrimaryFirstGroup = primaryGroups[rightMatch.primarySpan.groupStartIndex];
+    const leftSecondaryLastGroup = secondaryGroups[leftMatch.secondarySpan.groupEndIndex];
+    const rightSecondaryFirstGroup = secondaryGroups[rightMatch.secondarySpan.groupStartIndex];
+
+    const hasCommaBoundarySignal =
+      movedPrimaryGroup.textProfile.commaCount > 0 &&
+      rightSecondaryFirstGroup.textProfile.commaCount > 0 &&
+      movedPrimaryGroup.textProfile.commaCount > rightPrimaryFirstGroup.textProfile.commaCount &&
+      rightSecondaryFirstGroup.textProfile.commaCount > leftSecondaryLastGroup.textProfile.commaCount;
+    if (!hasCommaBoundarySignal) {
+      continue;
+    }
+
+    const candidateLeftPrimarySpan = buildGroupSpan(
+      primaryGroups,
+      leftMatch.primarySpan.groupStartIndex,
+      leftPrimarySpanLength - 1,
+    );
+    const candidateRightPrimarySpan = buildGroupSpan(
+      primaryGroups,
+      rightMatch.primarySpan.groupStartIndex - 1,
+      rightPrimarySpanLength + 1,
+    );
+
+    const leftCurrentScore = scoreSpanPair(leftMatch.primarySpan, leftMatch.secondarySpan);
+    const rightCurrentScore = scoreSpanPair(rightMatch.primarySpan, rightMatch.secondarySpan);
+    const leftCandidateScore = scoreSpanPair(candidateLeftPrimarySpan, leftMatch.secondarySpan);
+    const rightCandidateScore = scoreSpanPair(candidateRightPrimarySpan, rightMatch.secondarySpan);
+    if (
+      !Number.isFinite(leftCurrentScore) ||
+      !Number.isFinite(rightCurrentScore) ||
+      !Number.isFinite(leftCandidateScore) ||
+      !Number.isFinite(rightCandidateScore)
+    ) {
+      continue;
+    }
+
+    const currentTotalScore = leftCurrentScore + rightCurrentScore;
+    const candidateTotalScore = leftCandidateScore + rightCandidateScore;
+    if (candidateTotalScore + BOUNDARY_REFINEMENT_SCORE_TOLERANCE < currentTotalScore) {
+      continue;
+    }
+
+    refined[index] = {
+      primarySpan: candidateLeftPrimarySpan,
+      secondarySpan: leftMatch.secondarySpan,
+    };
+    refined[index + 1] = {
+      primarySpan: candidateRightPrimarySpan,
+      secondarySpan: rightMatch.secondarySpan,
+    };
+  }
+
+  return refined;
 }
 
 function remapSpanCues(
@@ -1298,7 +1405,11 @@ export function prepareTimingLock(
     shiftCue(cue, secondaryCueShiftMs[index] ?? autoSecondaryShiftMs),
   );
   const secondaryGroups = buildCueGroups(secondaryShiftedCues, groupGapMs);
-  const matchedSpans = alignGroups(primaryGroups, secondaryGroups);
+  const matchedSpans = refineAdjacentMatchBoundaries(
+    alignGroups(primaryGroups, secondaryGroups),
+    primaryGroups,
+    secondaryGroups,
+  );
 
   return {
     primaryAdjustedCues,

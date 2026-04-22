@@ -289,4 +289,106 @@ describe("subtitle timing lock", () => {
     expect(result.secondaryCues[3].startMs).toBe(primaryCues[3].startMs);
     expect(result.secondaryCues[4].startMs).toBe(primaryCues[4].startMs);
   });
+
+  it("avoids stretching a single translated cue across three primary cues", () => {
+    const primaryCues: Cue[] = [
+      cue(344, 983291, 985531, "Danny."),
+      cue(345, 985458, 989128, "I don't, either.\nNot yet."),
+      cue(346, 989125, 991165, "Mommy, it's cold!"),
+      cue(347, 991167, 992247, "Yeah, I'm coming,\nsweetie."),
+      cue(348, 992250, 994830, "I called in a favor\nwith NYPD."),
+      cue(349, 994834, 997044, "A guy on the task force\nnamed Danny Jones."),
+      cue(350, 997042, 999752, "He can get you into the prison\nward at Bellevue tomorrow"),
+      cue(351, 999750, 1000920, "to see Quinn."),
+      cue(352, 1000917, 1002247, "-Thank you.\n-Don't thank me."),
+      cue(353, 1002250, 1003960, "It shows\njust how fucked we are"),
+    ];
+    const secondaryCues: Cue[] = [
+      cue(326, 986192, 988362, "היא לוקחת את הפלאפונים."),
+      cue(327, 986880, 988860, ",גם אני לא יודעת\n.עדיין לא"),
+      cue(328, 990280, 993130, ".אמא, קר לי\n.כן, אני באה, מותק-"),
+      cue(329, 994010, 995830, "ביקשתי טובה\n.ממשטרת ניו-יורק"),
+      cue(330, 995920, 997960, "בחור בכוח המשימה\n.בשם דני ג'ונס"),
+      cue(331, 998570, 1001180, "הוא יכניס אותך מחר לאגף הכלא\n.ב-\"בלוויו\", כדי לפגוש את קווין"),
+      cue(332, 1001560, 1003270, ".תודה לך\n.אל תודי לי-"),
+    ];
+
+    const result = buildTimingLockedCues({
+      primaryCues,
+      secondaryCues,
+      primaryOffsetMs: 0,
+      secondaryOffsetMs: 0,
+      blend: 0,
+      enabled: true,
+      groupGapMs: 180,
+    });
+
+    const primary348 = result.primaryCues.find((entry) => entry.index === 348);
+    const primary349 = result.primaryCues.find((entry) => entry.index === 349);
+    const secondary328 = result.secondaryCues.find((entry) => entry.index === 328);
+    const secondary329 = result.secondaryCues.find((entry) => entry.index === 329);
+
+    expect(primary348).toBeDefined();
+    expect(primary349).toBeDefined();
+    expect(secondary328).toBeDefined();
+    expect(secondary329).toBeDefined();
+
+    expect(secondary328!.endMs).toBeLessThan(secondary329!.startMs);
+    expect(secondary329!.startMs).toBeLessThan(primary348!.endMs);
+    expect(secondary329!.endMs).toBeLessThanOrEqual(primary348!.endMs);
+    expect(secondary329!.startMs).toBeLessThan(primary349!.startMs);
+  });
+
+  it("keeps comma-intro dialogue aligned to the following primary boundary", () => {
+    const primaryCues: Cue[] = [
+      cue(646, 2180042, 2181832, "I am not\ndenying protection."),
+      cue(647, 2181834, 2184884, "You are free to escort me\nback to New York."),
+      cue(648, 2184875, 2186455, "Neither Mrs. Diehl\nnor her vehicle"),
+      cue(649, 2186458, 2188208, "are equipped\nto transport you safely."),
+      cue(650, 2188208, 2190078, "She is\nperfectly equipped."),
+      cue(651, 2190083, 2192173, "Ma'am, I understand\nyour impatience,"),
+      cue(652, 2192166, 2194956, "but it's still possible\nthat you were the target"),
+      cue(653, 2194959, 2196499, "-of an assassination attempt.\n-No."),
+      cue(654, 2196500, 2199130, "Agent Thoms, I don't believe\nthat anymore. And you know what?"),
+      cue(655, 2199125, 2201375, "I don't believe anybody\nelse believes it, either."),
+      cue(656, 2201375, 2203075, "See you in New York."),
+    ];
+    const secondaryCues: Cue[] = [
+      cue(606, 2181820, 2183610, "אני לא מסרבת\n.להגנה"),
+      cue(607, 2183614, 2186672, "אתם חופשיים ללוות אותי\n.חזרה לניו-יורק"),
+      cue(608, 2187340, 2190350, "גברת דיהל והרכב שלה, שניהם\n.אינם מתאימים להסיע אותך בבטחה"),
+      cue(609, 2190730, 2192470, ".היא מתאימה בהחלט"),
+      cue(610, 2193020, 2194900, "גברתי, אני מבין\n,את חוסר הסבלנות שלך"),
+      cue(611, 2195170, 2198220, "אבל זה עדיין אפשרי שאת\n.היית המטרה של נסיון התנקשות"),
+      cue(612, 2198240, 2200809, "לא, הסוכן תומס,\n,אני כבר לא מאמינה שזה נכון"),
+      cue(613, 2200810, 2203460, "ויודע מה, אני לא מאמינה\n.שיש עדיין מישהו שמאמין בזה"),
+      cue(614, 2203570, 2205090, ".נתראה בניו-יורק"),
+    ];
+
+    const result = buildTimingLockedCues({
+      primaryCues,
+      secondaryCues,
+      primaryOffsetMs: 0,
+      secondaryOffsetMs: 0,
+      blend: 0,
+      enabled: true,
+      groupGapMs: 180,
+    });
+
+    const primary651 = result.primaryCues.find((entry) => entry.index === 651);
+    const primary650 = result.primaryCues.find((entry) => entry.index === 650);
+    const primary652 = result.primaryCues.find((entry) => entry.index === 652);
+    const secondary610 = result.secondaryCues.find((entry) => entry.index === 610);
+    const secondary609 = result.secondaryCues.find((entry) => entry.index === 609);
+
+    expect(primary651).toBeDefined();
+    expect(primary650).toBeDefined();
+    expect(primary652).toBeDefined();
+    expect(secondary610).toBeDefined();
+    expect(secondary609).toBeDefined();
+
+    expect(secondary610!.startMs).toBe(primary651!.startMs);
+    expect(secondary610!.startMs).toBeLessThan(primary652!.startMs);
+    expect(secondary609!.endMs).toBe(primary650!.endMs);
+  });
 });
