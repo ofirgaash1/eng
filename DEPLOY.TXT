@@ -5,3 +5,10 @@ git commit -m "ok"
 git push
 $split = (git subtree split --prefix dist main 2>$null).Trim()
 git push origin "$split`:gh-pages" --force
+
+
+we have harness (i think thats how its called) around the subtitles lock logic.
+i want you to check what it does to HEB.SRT and ENG.SRT specifically around:
+
+i want you to see if that's "solves itslef" after 
+
