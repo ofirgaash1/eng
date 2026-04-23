@@ -391,4 +391,60 @@ describe("subtitle timing lock", () => {
     expect(secondary610!.startMs).toBeLessThan(primary652!.startMs);
     expect(secondary609!.endMs).toBe(primary650!.endMs);
   });
+
+  it("keeps unmatched lead-in cues on the continuity shift before a late section realigns", () => {
+    const primaryCues: Cue[] = [
+      cue(694, 2753674, 2754714, "We need to talk."),
+      cue(695, 2756678, 2758728, "Mira set me straight on a few things."),
+      cue(696, 2758731, 2760733, "Call me back."),
+      cue(697, 2761636, 2763658, "Call me back. Call me back."),
+      cue(698, 2876726, 2877726, "Oh. Hey, watch it."),
+      cue(699, 2877730, 2879676, "Sorry."),
+    ];
+    const secondaryCues: Cue[] = [
+      cue(646, 2746676, 2748036, "אנחנו צריכים לדבר."),
+      cue(647, 2749636, 2751486, "מירה גרמה לי להבין\nמספר דברים."),
+      cue(648, 2752566, 2753886, "החזירי לי צלצול."),
+      cue(649, 2754326, 2755796, "החזירי לי צלצול,\nהחזירי לי צלצול."),
+      cue(650, 2813687, 2816486, "\u0001- פיצוץ מטלטל את העיר -\u0002"),
+      cue(651, 2816487, 2817737, "\u0001- ברחה מניו-יורק -\u0002"),
+      cue(652, 2819598, 2822198, "\u0001- ההפיכה של סקו -\n- המתקפה הראשונה של אל-קאעידה -\u0002"),
+      cue(653, 2822199, 2823549, "\u0001- הפצצה של סקו בה -\n- שוחרר על-ידי הבולשת -\u0002"),
+      cue(654, 2823550, 2824950, "\u0001- פיצוץ מטלטל את העיר -\n- האם דר ניסה להזהיר אותי להתרחק? -\u0002"),
+      cue(655, 2824951, 2826525, "\u0001- ברחה מניו-יורק -\u0002"),
+      cue(656, 2829190, 2830390, "\u0001- מה עם סול? -\u0002"),
+      cue(657, 2830391, 2831691, "\u0001- סוכנות הביון המרכזית -\n- סוכנות הביון ההגנתי -\u0002"),
+    ];
+
+    const result = buildTimingLockedCues({
+      primaryCues,
+      secondaryCues,
+      primaryOffsetMs: 0,
+      secondaryOffsetMs: 0,
+      blend: 0,
+      enabled: true,
+      groupGapMs: 180,
+    });
+
+    const secondary649 = result.secondaryCues.find((entry) => entry.index === 649);
+    const secondary650 = result.secondaryCues.find((entry) => entry.index === 650);
+    const secondary656 = result.secondaryCues.find((entry) => entry.index === 656);
+    const primary697 = result.primaryCues.find((entry) => entry.index === 697);
+    const primary698 = result.primaryCues.find((entry) => entry.index === 698);
+
+    expect(secondary649).toBeDefined();
+    expect(secondary650).toBeDefined();
+    expect(secondary656).toBeDefined();
+    expect(primary697).toBeDefined();
+    expect(primary698).toBeDefined();
+
+    expect(secondary649!.endMs).toBe(primary697!.endMs);
+    expect(secondary656!.startMs).toBe(primary698!.startMs);
+
+    const shift649 = secondary649!.startMs - secondaryCues[3].startMs;
+    const shift650 = secondary650!.startMs - secondaryCues[4].startMs;
+    const shift656 = secondary656!.startMs - secondaryCues[10].startMs;
+    expect(Math.abs(shift650 - shift649)).toBeLessThan(1200);
+    expect(shift656 - shift650).toBeGreaterThan(20000);
+  });
 });

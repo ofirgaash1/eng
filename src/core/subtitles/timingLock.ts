@@ -110,6 +110,7 @@ const SECTION_SHIFT_LOOKAHEAD_GROUP_COUNT = 21;
 const MIN_SECTION_SHIFT_GROUP_COUNT = 2;
 const SECTION_CONTINUITY_TOLERANCE_MS = 2_500;
 const SECTION_SHIFT_REFERENCE_TOLERANCE_MS = 45_000;
+const SECTION_LEAD_IN_SHIFT_JUMP_TOLERANCE_MS = 12_000;
 const MUSIC_MARKER_RE = /[♪♫♬♩]/;
 const DIGIT_TOKEN_RE = /\d+/g;
 const SPEAKER_LABEL_RE = /^[\p{L}\p{N} .'\-]{2,24}:/u;
@@ -145,7 +146,7 @@ function overlapMs(aStart: number, aEnd: number, bStart: number, bEnd: number): 
 }
 
 function stripMarkup(text: string): string {
-  return text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  return text.replace(/[\u0001\u0002]/g, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function isShortHyphenWrappedCredit(text: string): boolean {
@@ -721,6 +722,29 @@ function shiftedSectionStartDistanceMs(
   return nearestDistanceMs;
 }
 
+function findFirstOverlappingGroupIndex(
+  primaryGroups: CueGroup[],
+  secondarySection: CueGroup[],
+  shiftMs: number,
+): number {
+  for (let groupIndex = 0; groupIndex < secondarySection.length; groupIndex += 1) {
+    const group = secondarySection[groupIndex];
+    for (const primaryGroup of primaryGroups) {
+      if (
+        overlapMs(
+          primaryGroup.startMs,
+          primaryGroup.endMs,
+          group.startMs + shiftMs,
+          group.endMs + shiftMs,
+        ) > 0
+      ) {
+        return groupIndex;
+      }
+    }
+  }
+  return -1;
+}
+
 function shouldContinueSectionShift(
   primaryGroups: CueGroup[],
   secondarySection: CueGroup[],
@@ -834,6 +858,7 @@ function buildSecondaryCueShiftsBySection(
   for (let index = 0; index < secondarySections.length; index += 1) {
     const secondarySection = secondarySections[index];
     let sectionShiftMs = previousSectionShiftMs;
+    const continuityShiftMs = previousSectionShiftMs;
 
     if (
       index === 0 ||
@@ -867,14 +892,28 @@ function buildSecondaryCueShiftsBySection(
       sectionShiftMs = bestSectionShift.shiftMs;
     }
 
-    sectionShifts.push(sectionShiftMs);
-    previousSectionShiftMs = sectionShiftMs;
+    const hasLargeShiftJump =
+      index > 0 &&
+      Math.abs(sectionShiftMs - continuityShiftMs) > SECTION_LEAD_IN_SHIFT_JUMP_TOLERANCE_MS;
+    const firstOverlappingGroupIndex = hasLargeShiftJump
+      ? findFirstOverlappingGroupIndex(primaryGroups, secondarySection, sectionShiftMs)
+      : -1;
 
-    for (const group of secondarySection) {
+    for (let groupIndex = 0; groupIndex < secondarySection.length; groupIndex += 1) {
+      const group = secondarySection[groupIndex];
+      const groupShiftMs =
+        hasLargeShiftJump &&
+        firstOverlappingGroupIndex > 0 &&
+        groupIndex < firstOverlappingGroupIndex
+          ? continuityShiftMs
+          : sectionShiftMs;
       for (const cueIndex of group.cueIndices) {
-        shifts[cueIndex] = sectionShiftMs;
+        shifts[cueIndex] = groupShiftMs;
       }
     }
+
+    sectionShifts.push(sectionShiftMs);
+    previousSectionShiftMs = sectionShiftMs;
   }
 
   return {
