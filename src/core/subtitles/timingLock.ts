@@ -109,6 +109,8 @@ const SECTION_SHIFT_PRIMARY_CANDIDATE_GROUP_COUNT = 6;
 const SECTION_SHIFT_LOOKAHEAD_GROUP_COUNT = 21;
 const MIN_SECTION_SHIFT_GROUP_COUNT = 2;
 const SECTION_CONTINUITY_TOLERANCE_MS = 2_500;
+const SECTION_CONTINUITY_LOOKAHEAD_GROUP_COUNT = 12;
+const MIN_SECTION_CONTINUITY_OVERLAP_COUNT = 2;
 const SECTION_SHIFT_REFERENCE_TOLERANCE_MS = 45_000;
 const SECTION_LEAD_IN_SHIFT_JUMP_TOLERANCE_MS = 12_000;
 const MUSIC_MARKER_RE = /[♪♫♬♩]/;
@@ -359,6 +361,27 @@ function countSharedTokens(primaryTokens: string[], secondaryTokens: string[]): 
   return sharedTokenCount;
 }
 
+function isNonDialogueOnlyProfile(profile: TextProfile): boolean {
+  return (
+    profile.lineCount > 0 &&
+    profile.parentheticalLineCount + profile.musicLineCount === profile.lineCount
+  );
+}
+
+function canAnchorByTimelineOverlap(primaryProfile: TextProfile, secondaryProfile: TextProfile): boolean {
+  const primaryIsNonDialogueOnly = isNonDialogueOnlyProfile(primaryProfile);
+  const secondaryIsNonDialogueOnly = isNonDialogueOnlyProfile(secondaryProfile);
+
+  if (primaryIsNonDialogueOnly !== secondaryIsNonDialogueOnly) {
+    return false;
+  }
+  if (primaryProfile.musicLineCount > 0 !== (secondaryProfile.musicLineCount > 0)) {
+    return false;
+  }
+
+  return true;
+}
+
 function scoreTextCompatibility(primaryProfile: TextProfile, secondaryProfile: TextProfile): number {
   const lineSimilarity = countSimilarity(primaryProfile.lineCount, secondaryProfile.lineCount);
   const wordSimilarity = countSimilarity(primaryProfile.wordCount, secondaryProfile.wordCount);
@@ -554,6 +577,14 @@ function scoreGlobalOverlap(primaryGroups: CueGroup[], secondaryGroups: CueGroup
     );
 
     if (overlap > 0) {
+      if (!canAnchorByTimelineOverlap(primaryGroup.textProfile, secondaryGroup.textProfile)) {
+        if (primaryGroup.endMs <= shiftedEnd) {
+          primaryIndex += 1;
+        } else {
+          secondaryIndex += 1;
+        }
+        continue;
+      }
       const similarity = durationSimilarity(groupDuration(primaryGroup), groupDuration(secondaryGroup));
       const sharedWordTokenCount = countSharedTokens(
         primaryGroup.textProfile.wordTokens,
@@ -745,6 +776,38 @@ function findFirstOverlappingGroupIndex(
   return -1;
 }
 
+function countCompatibleContinuityOverlaps(
+  primaryGroups: CueGroup[],
+  secondarySection: CueGroup[],
+  shiftMs: number,
+): number {
+  let overlapCount = 0;
+  const secondaryLookahead = secondarySection.slice(0, SECTION_CONTINUITY_LOOKAHEAD_GROUP_COUNT);
+
+  for (const secondaryGroup of secondaryLookahead) {
+    const shiftedStart = secondaryGroup.startMs + shiftMs;
+    const shiftedEnd = secondaryGroup.endMs + shiftMs;
+
+    for (const primaryGroup of primaryGroups) {
+      if (primaryGroup.endMs < shiftedStart) {
+        continue;
+      }
+      if (primaryGroup.startMs > shiftedEnd) {
+        break;
+      }
+      if (
+        overlapMs(primaryGroup.startMs, primaryGroup.endMs, shiftedStart, shiftedEnd) > 0 &&
+        canAnchorByTimelineOverlap(primaryGroup.textProfile, secondaryGroup.textProfile)
+      ) {
+        overlapCount += 1;
+        break;
+      }
+    }
+  }
+
+  return overlapCount;
+}
+
 function shouldContinueSectionShift(
   primaryGroups: CueGroup[],
   secondarySection: CueGroup[],
@@ -752,7 +815,9 @@ function shouldContinueSectionShift(
 ): boolean {
   return (
     shiftedSectionStartDistanceMs(primaryGroups, secondarySection, continuityShiftMs) <=
-    SECTION_CONTINUITY_TOLERANCE_MS
+      SECTION_CONTINUITY_TOLERANCE_MS ||
+    countCompatibleContinuityOverlaps(primaryGroups, secondarySection, continuityShiftMs) >=
+      MIN_SECTION_CONTINUITY_OVERLAP_COUNT
   );
 }
 
@@ -1000,6 +1065,9 @@ function scoreSpanPair(primarySpan: GroupSpan, secondarySpan: GroupSpan): number
     (secondarySpan.groupEndIndex - secondarySpan.groupStartIndex) * 28;
   const cueCountPenalty = cueCountGap * 120 + (cueCountGap > 1 ? (cueCountGap - 1) * 220 : 0);
 
+  if (!canAnchorByTimelineOverlap(primarySpan.textProfile, secondarySpan.textProfile)) {
+    return Number.NEGATIVE_INFINITY;
+  }
   if (primaryIsCreditLike !== secondaryIsCreditLike) {
     return Number.NEGATIVE_INFINITY;
   }

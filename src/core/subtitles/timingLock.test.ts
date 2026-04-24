@@ -11,6 +11,11 @@ function cue(index: number, startMs: number, endMs: number, rawText: string): Cu
   };
 }
 
+// Regression cases here intentionally copy small cue windows from scratch
+// `heb.srt` / `eng.srt` investigations. Those root SRT files are replaced
+// often, so durable tests should encode the semantic alignment that was judged
+// correct by reading the English and Hebrew dialogue, not by preserving full
+// source files or unstable SRT line numbers.
 describe("subtitle timing lock", () => {
   it("keeps unmatched intro groups while aligning merged speech groups", () => {
     const primaryCues: Cue[] = [
@@ -446,5 +451,111 @@ describe("subtitle timing lock", () => {
     const shift656 = secondary656!.startMs - secondaryCues[10].startMs;
     expect(Math.abs(shift650 - shift649)).toBeLessThan(1200);
     expect(shift656 - shift650).toBeGreaterThan(20000);
+  });
+
+  it("keeps dialogue aligned after unmatched laptop captions in the secondary track", () => {
+    const primaryCues: Cue[] = [
+      cue(452, 1477458, 1478583, "[taps key]"),
+      cue(453, 1492208, 1497333, "♪♪♪"),
+      cue(454, 1499208, 1501624, "[laptop chimes faintly]"),
+      cue(455, 1501625, 1505332, "[birds chirping]"),
+      cue(456, 1505333, 1507917, "[sighs]\n[laptop chimes]"),
+      cue(457, 1509625, 1510834, "[laptop chimes]"),
+      cue(458, 1522000, 1524207, "[typing]"),
+      cue(459, 1524208, 1526375, "[laptop chimes]"),
+      cue(460, 1528500, 1530500, "[laptop chimes]"),
+      cue(461, 1532333, 1535874, "[typing]"),
+      cue(462, 1535875, 1538000, "[laptop chimes]"),
+      cue(463, 1540542, 1541792, "[laptop chimes]"),
+      cue(464, 1547333, 1549666, "[taps key, laptop whirring]"),
+      cue(465, 1549667, 1550958, "[Franny] Mommy!"),
+      cue(466, 1550959, 1552457, "- Oh!\n- Help."),
+      cue(467, 1552458, 1556374, "Oh, sweetie,\nyou missed a button."),
+      cue(468, 1556375, 1557375, "Here."),
+      cue(469, 1557376, 1559374, "[laptop whooshes]"),
+      cue(470, 1559375, 1560541, "What's wrong?"),
+      cue(471, 1560542, 1564207, "Uh, nothing. Why don't you, uh,\ngo start your breakfast?"),
+      cue(472, 1564208, 1566374, "I'll be down in\na second, okay? Okay."),
+      cue(473, 1566375, 1569875, "♪ suspenseful music playing ♪"),
+      cue(474, 1574041, 1576708, "[taps key]"),
+      cue(475, 1576709, 1578040, "♪♪♪"),
+      cue(476, 1578041, 1579291, "[exhales deeply]"),
+      cue(477, 1580792, 1582250, "[exhales deeply]"),
+      cue(478, 1586625, 1587625, "[Maggie] Carrie?"),
+      cue(479, 1587626, 1591082, "Carrie, can you please\ncome down?"),
+      cue(480, 1591083, 1596250, "♪♪♪"),
+      cue(481, 1604834, 1606416, "Hey. What's going on?"),
+      cue(482, 1606417, 1610332, "My meeting got moved\nan hour earlier,"),
+    ];
+    const secondaryCues: Cue[] = [
+      cue(327, 1472322, 1473909, "מישהו חושב -\n- ?שקין השמינה קצת"),
+      cue(328, 1482095, 1485896, "- ?מישהו יודע מי זו -"),
+      cue(329, 1517388, 1519393, "- אני יודע מי האישה בתמונה -"),
+      cue(330, 1523193, 1524572, "- ?מי -"),
+      cue(331, 1528540, 1530085, "- ?את סוכנת פדרלית -"),
+      cue(332, 1533844, 1536726, "- לא, רק אזרחית מודאגת -"),
+      cue(333, 1549506, 1550718, ".אמא"),
+      cue(334, 1551971, 1553015, ".הצילו"),
+      cue(335, 1553265, 1554811, ".מתוקה, פספסת כפתור"),
+      cue(336, 1556407, 1557451, ".הנה"),
+      cue(337, 1559289, 1560500, "?מה קרה"),
+      cue(338, 1560959, 1562087, ".כלום"),
+      cue(339, 1562337, 1565094, "?אולי תלכי לאכול ארוחת בוקר\n?אני כבר יורדת, טוב"),
+      cue(340, 1565637, 1566681, "?טוב"),
+      cue(341, 1572779, 1574533, "- לחץ על כל מקש -"),
+      cue(342, 1574867, 1576287, "הקבצים שלך נעולים, כדי לשחררם -\n- עליך לשלם 5,000 דולר"),
+      cue(343, 1582511, 1584474, "המחשב שלך נדבק -\n- בתוכנת כופר"),
+      cue(344, 1584599, 1586437, "- עליך לשלם 5,000 דולר -"),
+      cue(345, 1586562, 1587773, "?קארי"),
+      cue(346, 1588609, 1590237, "קארי, את מוכנה\n?לרדת בבקשה"),
+      cue(347, 1604263, 1607646, "?היי. מה קרה\n,הפגישה שלי הוקדמה בשעה-"),
+      cue(348, 1607730, 1609317, "אז תוכלי להסיע\n?את הבנות לבית הספר"),
+      cue(349, 1610152, 1611781, ".אני יכולה\n.לא-"),
+      cue(350, 1612450, 1617462, ",קארי? -הלוואי שיכולתי\n.אבל יש לי ריאיון"),
+      cue(351, 1618088, 1619884, ".תורידי אותן בדרך\n.אני יכולה לעשות את זה-"),
+      cue(352, 1620302, 1623935, ",לא. -זה ריאיון בסקייפ\n.בעוד עשר דקות"),
+    ];
+
+    const result = buildTimingLockedCues({
+      primaryCues,
+      secondaryCues,
+      primaryOffsetMs: 0,
+      secondaryOffsetMs: 0,
+      blend: 0,
+      enabled: true,
+      groupGapMs: 180,
+    });
+
+    const secondary333 = result.secondaryCues.find((entry) => entry.index === 333);
+    const secondary337 = result.secondaryCues.find((entry) => entry.index === 337);
+    const secondary342 = result.secondaryCues.find((entry) => entry.index === 342);
+    const secondary347 = result.secondaryCues.find((entry) => entry.index === 347);
+    const primary465 = result.primaryCues.find((entry) => entry.index === 465);
+    const primary468 = result.primaryCues.find((entry) => entry.index === 468);
+    const primary470 = result.primaryCues.find((entry) => entry.index === 470);
+    const primary472 = result.primaryCues.find((entry) => entry.index === 472);
+    const primary473 = result.primaryCues.find((entry) => entry.index === 473);
+    const primary481 = result.primaryCues.find((entry) => entry.index === 481);
+    const primary482 = result.primaryCues.find((entry) => entry.index === 482);
+
+    expect(secondary333).toBeDefined();
+    expect(secondary337).toBeDefined();
+    expect(secondary342).toBeDefined();
+    expect(secondary347).toBeDefined();
+    expect(primary465).toBeDefined();
+    expect(primary468).toBeDefined();
+    expect(primary470).toBeDefined();
+    expect(primary472).toBeDefined();
+    expect(primary473).toBeDefined();
+    expect(primary481).toBeDefined();
+    expect(primary482).toBeDefined();
+
+    expect(secondary333!.startMs).toBeGreaterThanOrEqual(primary465!.startMs);
+    expect(secondary333!.startMs).toBeLessThan(primary468!.startMs);
+    expect(secondary337!.startMs).toBeGreaterThanOrEqual(primary470!.startMs);
+    expect(secondary337!.startMs).toBeLessThan(primary473!.startMs);
+    expect(secondary342!.startMs).toBeGreaterThan(primary472!.endMs);
+    expect(secondary347!.startMs).toBeGreaterThanOrEqual(primary481!.startMs);
+    expect(secondary347!.startMs).toBeLessThan(primary482!.endMs);
   });
 });
