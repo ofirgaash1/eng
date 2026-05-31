@@ -4,6 +4,7 @@ import {
   buildPrefixedSubtitleFileName,
   ensureSrtFileName,
   isBlockedOpenSubtitlesItem,
+  pickBestMatchingSubtitleForVideo,
   pickMostDownloadedSubtitle,
   searchOpenSubtitlesSubtitlesWithFallback,
   withOpenSubtitlesApiKeyFallback,
@@ -92,6 +93,40 @@ describe("openSubtitles helpers", () => {
     ];
 
     expect(pickMostDownloadedSubtitle(items)?.id).toBe("high");
+  });
+
+  it("prefers matching show-title and episode over unrelated top-download entries", () => {
+    const items: OpenSubtitlesItem[] = [
+      {
+        id: "wrong-but-popular",
+        attributes: {
+          language: "he",
+          download_count: 30897,
+          files: [{ file_id: 1, file_name: "In.Treatment.S01E01.XVID-2HD.srt" }],
+        },
+      },
+      {
+        id: "right",
+        attributes: {
+          language: "he",
+          download_count: 10284,
+          files: [
+            {
+              file_id: 2,
+              file_name:
+                "Its.Always.Sunny.In.Philadelphia.S01E01.DVDRip.XviD-NODLABS.srt",
+            },
+          ],
+        },
+      },
+    ];
+
+    expect(
+      pickBestMatchingSubtitleForVideo(
+        "It's Always Sunny in Philadelphia - 1x01 - The Gang Gets Racist.mkv",
+        items,
+      )?.id,
+    ).toBe("right");
   });
 
   it("blocks IMMERSE releases from selection", () => {

@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import {
   downloadOpenSubtitlesSubtitle,
+  getSubtitleMatchScoreForVideo,
   OPEN_SUBTITLES_DEFAULT_API_KEY,
   OPEN_SUBTITLES_FALLBACK_API_KEY,
   OPEN_SUBTITLES_LOCAL_API_KEY,
@@ -21,7 +22,7 @@ type StatusMessage = {
   tone: StatusTone;
 };
 
-type SortField = "title" | "downloads" | "hearingImpaired";
+type SortField = "match" | "title" | "downloads" | "hearingImpaired";
 type SortDirection = "asc" | "desc";
 
 const toneStyles: Record<StatusTone, string> = {
@@ -42,7 +43,7 @@ export default function VlsubPage() {
   const [results, setResults] = useState<OpenSubtitlesItem[] | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
-  const [sortField, setSortField] = useState<SortField>("downloads");
+  const [sortField, setSortField] = useState<SortField>("match");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
   const updateStatus = useCallback(
@@ -126,25 +127,40 @@ export default function VlsubPage() {
   const statusLabel = status.summary || "";
 
   const resultsEmpty = useMemo(() => results !== null && results.length === 0, [results]);
-  const sortedResults = useMemo(() => {
+  const scoredResults = useMemo(() => {
     if (!results) return null;
+    const videoName = file?.name ?? "";
+    return results.map((item) => ({
+      item,
+      matchScore: videoName ? getSubtitleMatchScoreForVideo(videoName, item) : 0,
+    }));
+  }, [file?.name, results]);
+
+  const sortedResults = useMemo(() => {
+    if (!scoredResults) return null;
     const direction = sortDirection === "asc" ? 1 : -1;
-    return [...results].sort((a, b) => {
-      const aTitle = a.attributes.files?.[0]?.file_name ?? "Untitled release";
-      const bTitle = b.attributes.files?.[0]?.file_name ?? "Untitled release";
+    return [...scoredResults].sort((a, b) => {
+      const aTitle = a.item.attributes.files?.[0]?.file_name ?? "Untitled release";
+      const bTitle = b.item.attributes.files?.[0]?.file_name ?? "Untitled release";
 
       switch (sortField) {
+        case "match":
+          return (a.matchScore - b.matchScore) * direction;
         case "title":
           return aTitle.localeCompare(bTitle, undefined, { sensitivity: "base" }) * direction;
         case "downloads":
-          return ((a.attributes.download_count ?? 0) - (b.attributes.download_count ?? 0)) * direction;
+          return (
+            (a.item.attributes.download_count ?? 0) - (b.item.attributes.download_count ?? 0)
+          ) * direction;
         case "hearingImpaired":
-          return (Number(a.attributes.hearing_impaired) - Number(b.attributes.hearing_impaired)) * direction;
+          return (
+            Number(a.item.attributes.hearing_impaired) - Number(b.item.attributes.hearing_impaired)
+          ) * direction;
         default:
           return 0;
       }
     });
-  }, [results, sortDirection, sortField]);
+  }, [scoredResults, sortDirection, sortField]);
 
   const toggleSort = useCallback(
     (field: SortField) => {
@@ -330,6 +346,16 @@ export default function VlsubPage() {
                     <th className="px-4 py-3">
                       <button
                         type="button"
+                        onClick={() => toggleSort("match")}
+                        className="flex items-center gap-2 hover:text-white"
+                      >
+                        Match
+                        {sortField === "match" ? (sortDirection === "asc" ? "ג–²" : "ג–¼") : null}
+                      </button>
+                    </th>
+                    <th className="px-4 py-3">
+                      <button
+                        type="button"
                         onClick={() => toggleSort("title")}
                         className="flex items-center gap-2 hover:text-white"
                       >
@@ -365,11 +391,12 @@ export default function VlsubPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {sortedResults.map((item) => {
+                  {sortedResults.map(({ item, matchScore }) => {
                     const fileInfo = item.attributes.files?.[0];
                     const fileName = fileInfo?.file_name ?? "Untitled release";
                     return (
                       <tr key={item.id} className="bg-white/5">
+                        <td className="px-4 py-3 text-xs">{Math.round(matchScore)}</td>
                         <td className="px-4 py-3">
                           <div className="font-semibold text-white">{fileName}</div>
                         </td>

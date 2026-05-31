@@ -33,7 +33,7 @@ import {
   OPEN_SUBTITLES_DEFAULT_API_KEY,
   OPEN_SUBTITLES_FALLBACK_API_KEY,
   OPEN_SUBTITLES_LOCAL_API_KEY,
-  pickMostDownloadedSubtitle,
+  pickBestMatchingSubtitleForVideo,
   saveBlobAsDownload,
   searchOpenSubtitlesSubtitlesWithFallback,
   withOpenSubtitlesApiKeyFallback,
@@ -1312,7 +1312,7 @@ export default function PlayerPage({ isActive = true }: { isActive?: boolean }) 
         });
         return {
           apiKey,
-          item: pickMostDownloadedSubtitle(payload.items),
+          item: pickBestMatchingSubtitleForVideo(videoName, payload.items),
         };
       },
     );

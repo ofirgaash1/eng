@@ -17,6 +17,27 @@ const OPEN_SUBTITLES_RELEASE_TAG_RE =
 const OPEN_SUBTITLES_KNOWN_FILE_EXTENSION_RE =
   /\.(?:3g2|3gp|asf|avi|divx|flv|m2ts|m4v|mkv|mov|mp4|mpeg|mpg|ogm|ogv|ts|vob|webm|wmv|srt|sub|ass|ssa)$/i;
 const OPEN_SUBTITLES_BLOCKED_RELEASE_RE = /\b(?:IMMERSE|FLEET)\b/i;
+const OPEN_SUBTITLES_MATCH_STOP_WORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "are",
+  "at",
+  "by",
+  "for",
+  "from",
+  "in",
+  "is",
+  "it",
+  "its",
+  "of",
+  "on",
+  "or",
+  "s",
+  "the",
+  "to",
+  "with",
+]);
 
 export type OpenSubtitlesFile = {
   file_id: number;
@@ -299,6 +320,99 @@ export function pickMostDownloadedSubtitle(
   }
 
   return [...withFiles].sort((left, right) => {
+    return (right.attributes.download_count ?? 0) - (left.attributes.download_count ?? 0);
+  })[0] ?? null;
+}
+
+function toMatchTokens(value: string): Set<string> {
+  const normalized = normalizeSearchQuery(value)
+    .replace(OPEN_SUBTITLES_KNOWN_FILE_EXTENSION_RE, "")
+    .replace(/['’]/g, "")
+    .toLowerCase();
+  const tokens = normalized.match(/[a-z0-9]+/g) ?? [];
+  return new Set(
+    tokens.filter(
+      (token) =>
+        token.length > 1 &&
+        !OPEN_SUBTITLES_MATCH_STOP_WORDS.has(token) &&
+        !/^\d+$/.test(token),
+    ),
+  );
+}
+
+function extractEpisodeIdentifier(value: string): string | null {
+  const match = findEpisodeIdentifier(normalizeSearchQuery(value));
+  return match?.episode ?? null;
+}
+
+function countSharedTokens(left: Set<string>, right: Set<string>): number {
+  let sharedCount = 0;
+  for (const token of left) {
+    if (right.has(token)) {
+      sharedCount += 1;
+    }
+  }
+  return sharedCount;
+}
+
+export function getSubtitleMatchScoreForVideo(videoName: string, item: OpenSubtitlesItem): number {
+  const videoTokens = toMatchTokens(videoName);
+  const videoEpisode = extractEpisodeIdentifier(videoName);
+  const candidateNames = getSubtitleReleaseNames(item);
+  const candidateEpisodes = candidateNames
+    .map((name) => extractEpisodeIdentifier(name))
+    .filter((episode): episode is string => Boolean(episode));
+
+  let tokenScore = 0;
+  for (const name of candidateNames) {
+    const candidateTokens = toMatchTokens(name);
+    if (candidateTokens.size === 0 || videoTokens.size === 0) {
+      continue;
+    }
+    const shared = countSharedTokens(videoTokens, candidateTokens);
+    if (shared === 0) {
+      continue;
+    }
+
+    const recall = shared / videoTokens.size;
+    const precision = shared / candidateTokens.size;
+    const score = recall * 520 + precision * 220;
+    if (score > tokenScore) {
+      tokenScore = score;
+    }
+  }
+
+  let episodeScore = 0;
+  if (videoEpisode && candidateEpisodes.length > 0) {
+    episodeScore = candidateEpisodes.some((episode) => episode === videoEpisode) ? 260 : -260;
+  }
+
+  const downloadCount = Math.max(0, item.attributes.download_count ?? 0);
+  const popularityScore = Math.min(90, Math.log10(downloadCount + 1) * 30);
+
+  return tokenScore + episodeScore + popularityScore;
+}
+
+export function pickBestMatchingSubtitleForVideo(
+  videoName: string,
+  items: OpenSubtitlesItem[],
+): OpenSubtitlesItem | null {
+  const withFiles = items.filter((item) =>
+    !isBlockedOpenSubtitlesItem(item) &&
+    item.attributes.files?.some((file) => Number.isFinite(file.file_id)),
+  );
+
+  if (withFiles.length === 0) {
+    return null;
+  }
+
+  return [...withFiles].sort((left, right) => {
+    const scoreDiff =
+      getSubtitleMatchScoreForVideo(videoName, right) -
+      getSubtitleMatchScoreForVideo(videoName, left);
+    if (scoreDiff !== 0) {
+      return scoreDiff;
+    }
     return (right.attributes.download_count ?? 0) - (left.attributes.download_count ?? 0);
   })[0] ?? null;
 }
